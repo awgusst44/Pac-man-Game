@@ -1,7 +1,7 @@
 # Pacman (C++)
 
 ## 1. Denumirea proiectului
-**Pacman** — implementare în C++17 a jocului clasic, realizată ca proiect de laborator la disciplina *Metaprogramare (C++)*.
+**Pacman** — implementare în C++17 a jocului clasic, realizată ca proiect de laborator la disciplina *Programarea în limbajul C++ *.
 
 ## 2. Descrierea proiectului / reguli de joc
 Jucătorul controlează personajul **Pacman** într-un labirint, mănâncă toate punctele (dots) și evită fantomele.
