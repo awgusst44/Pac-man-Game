@@ -1,9 +1,13 @@
 #pragma once
 
+#include <iosfwd>
+#include <string>
+
 #include "GameEngine.hpp"
 
 namespace pacman {
 
+// Desenatorul: afișează starea motorului. Nu modifică jocul.
 class Renderer {
 public:
     virtual ~Renderer() = default;
@@ -13,7 +17,7 @@ public:
     virtual void shutdown() = 0;
 };
 
-
+// Implementare în consolă (ASCII + culori ANSI).
 class ConsoleRenderer : public Renderer {
 public:
     void init() override;
@@ -22,8 +26,9 @@ public:
 
 private:
     void clearScreen();
-    char symbolFor(const GameEngine& engine, int x, int y) const;
-    void drawHud(const GameEngine& engine);
+    std::string symbolFor(const GameEngine& engine, int x, int y) const;
+    void drawHud(const GameEngine& engine, std::ostream& out) const;
+    void drawFooter(const GameEngine& engine, std::ostream& out) const;
 };
 
-}  
+}  // namespace pacman
