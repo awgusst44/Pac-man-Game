@@ -10,6 +10,26 @@
 
 namespace pacman {
 
+// ======================================================================
+//  Renderer (clasa abstractă): ordinea desenării
+// ======================================================================
+
+void Renderer::render(const GameEngine& engine) {
+    beginFrame();
+    drawBoard(engine.board());
+    for (const Ghost& ghost : engine.ghosts()) {
+        drawGhost(ghost);
+    }
+    drawPacman(engine.pacman());  // ultimul: Pacman apare deasupra fantomelor
+    drawHud(engine.score(), engine.pacman().lives, engine.dotsRemaining());
+    drawStatus(engine.state(), engine.score());
+    endFrame();
+}
+
+// ======================================================================
+//  ConsoleRenderer
+// ======================================================================
+
 namespace {
 
 // Coduri ANSI pentru culori (funcționează în Windows Terminal / PowerShell / Linux).
@@ -33,6 +53,17 @@ const char* ghostColor(GhostType type) {
     return kReset;
 }
 
+std::string cellSymbol(CellType cell) {
+    switch (cell) {
+        case CellType::Wall:        return std::string(kWall) + "#" + kReset;
+        case CellType::Dot:         return std::string(kDot) + "." + kReset;
+        case CellType::PowerPellet: return std::string(kPellet) + "o" + kReset;
+        case CellType::GhostHouse:  return std::string(kHouse) + "-" + kReset;
+        case CellType::Empty:       return " ";
+    }
+    return " ";
+}
+
 }  // namespace
 
 void ConsoleRenderer::init() {
@@ -47,85 +78,100 @@ void ConsoleRenderer::init() {
     clearScreen();
 }
 
-void ConsoleRenderer::clearScreen() {
-    std::cout << "\x1b[2J\x1b[H" << std::flush;
-}
-
-void ConsoleRenderer::render(const GameEngine& engine) {
-    std::ostringstream frame;
-    frame << "\x1b[H";  // cursor sus-stânga (fără clear, ca să nu pâlpâie)
-    drawHud(engine, frame);
-
-    const Board& board = engine.board();
-    for (int y = 0; y < board.height; ++y) {
-        for (int x = 0; x < board.width; ++x) {
-            frame << symbolFor(engine, x, y);
-        }
-        frame << kClearLine << '\n';
-    }
-
-    drawFooter(engine, frame);
-    frame << "\x1b[J";  // șterge restul ecranului
-    std::cout << frame.str() << std::flush;
-}
-
 void ConsoleRenderer::shutdown() {
     std::cout << kReset << "\x1b[?25h\n" << std::flush;  // arată cursorul
 }
 
-std::string ConsoleRenderer::symbolFor(const GameEngine& engine, int x, int y) const {
-    const Position here{x, y};
-    if (engine.pacman().position == here) {
-        return std::string(kPacman) + "C" + kReset;
-    }
-    for (const Ghost& ghost : engine.ghosts()) {
-        if (ghost.position != here) {
-            continue;
-        }
-        switch (ghost.mode) {
-            case GhostMode::Frightened: return std::string(kFrightened) + "w" + kReset;
-            case GhostMode::Eaten:      return std::string(kEaten) + "e" + kReset;
-            default:                    return std::string(ghostColor(ghost.type)) + "G" + kReset;
-        }
-    }
-    switch (engine.board().at(x, y)) {
-        case CellType::Wall:        return std::string(kWall) + "#" + kReset;
-        case CellType::Dot:         return std::string(kDot) + "." + kReset;
-        case CellType::PowerPellet: return std::string(kPellet) + "o" + kReset;
-        case CellType::GhostHouse:  return std::string(kHouse) + "-" + kReset;
-        case CellType::Empty:       return " ";
-    }
-    return " ";
+void ConsoleRenderer::clearScreen() { std::cout << "\x1b[2J\x1b[H" << std::flush; }
+
+void ConsoleRenderer::beginFrame() {
+    width_ = 0;
+    height_ = 0;
+    cells_.clear();
+    hud_.clear();
+    status_.clear();
 }
 
-void ConsoleRenderer::drawHud(const GameEngine& engine, std::ostream& out) const {
-    out << "SCOR: " << engine.score().current << "   RECORD: " << engine.score().best
-        << "   VIETI: " << engine.pacman().lives << "   PUNCTE RAMASE: " << engine.dotsRemaining()
-        << kClearLine << "\n\n";
+void ConsoleRenderer::drawBoard(const Board& board) {
+    width_ = board.width;
+    height_ = board.height;
+    cells_.assign(static_cast<std::size_t>(width_) * static_cast<std::size_t>(height_), " ");
+    for (int y = 0; y < height_; ++y) {
+        for (int x = 0; x < width_; ++x) {
+            put(Position(x, y), cellSymbol(board.at(x, y)));
+        }
+    }
 }
 
-void ConsoleRenderer::drawFooter(const GameEngine& engine, std::ostream& out) const {
-    out << '\n';
-    switch (engine.state()) {
+void ConsoleRenderer::put(const Position& position, const std::string& symbol) {
+    if (position.x < 0 || position.y < 0 || position.x >= width_ || position.y >= height_) {
+        return;  // în afara grilei desenate
+    }
+    cells_[static_cast<std::size_t>(position.y * width_ + position.x)] = symbol;
+}
+
+void ConsoleRenderer::drawPacman(const Pacman& pacman) {
+    put(pacman.position, std::string(kPacman) + "C" + kReset);
+}
+
+void ConsoleRenderer::drawGhost(const Ghost& ghost) {
+    switch (ghost.mode) {
+        case GhostMode::Frightened:
+            put(ghost.position, std::string(kFrightened) + "w" + kReset);
+            break;
+        case GhostMode::Eaten:
+            put(ghost.position, std::string(kEaten) + "e" + kReset);
+            break;
+        default:
+            put(ghost.position, std::string(ghostColor(ghost.type)) + "G" + kReset);
+            break;
+    }
+}
+
+void ConsoleRenderer::drawHud(const Score& score, int lives, int dotsRemaining) {
+    std::ostringstream text;
+    text << "SCOR: " << score.current << "   RECORD: " << score.best << "   VIETI: " << lives
+         << "   PUNCTE RAMASE: " << dotsRemaining;
+    hud_ = text.str();
+}
+
+void ConsoleRenderer::drawStatus(GameState state, const Score& score) {
+    std::ostringstream text;
+    switch (state) {
         case GameState::Menu:
-            out << "PACMAN - apasa W/A/S/D sau sagetile pentru a incepe. Q - iesire";
+            text << "PACMAN - apasa W/A/S/D sau sagetile pentru a incepe. Q - iesire";
             break;
         case GameState::Running:
-            out << "W/A/S/D sau sageti - miscare | P - pauza | Q - iesire";
+            text << "W/A/S/D sau sageti - miscare | P - pauza | Q - iesire";
             break;
         case GameState::Paused:
-            out << "PAUZA - apasa P pentru a continua";
+            text << "PAUZA - apasa P pentru a continua";
             break;
         case GameState::Won:
-            out << "AI CASTIGAT! Scor: " << engine.score().current
-                << ". Apasa o tasta de miscare pentru a juca din nou sau Q pentru iesire";
+            text << "AI CASTIGAT! Scor: " << score.current
+                 << ". Apasa o tasta de miscare pentru a juca din nou sau Q pentru iesire";
             break;
         case GameState::Lost:
-            out << "GAME OVER. Scor: " << engine.score().current
-                << ". Apasa o tasta de miscare pentru a juca din nou sau Q pentru iesire";
+            text << "GAME OVER. Scor: " << score.current
+                 << ". Apasa o tasta de miscare pentru a juca din nou sau Q pentru iesire";
             break;
     }
-    out << kClearLine << '\n';
+    status_ = text.str();
+}
+
+void ConsoleRenderer::endFrame() {
+    std::ostringstream frame;
+    frame << "\x1b[H";  // cursor sus-stânga (fără clear, ca să nu pâlpâie)
+    frame << hud_ << kClearLine << "\n\n";
+    for (int y = 0; y < height_; ++y) {
+        for (int x = 0; x < width_; ++x) {
+            frame << cells_[static_cast<std::size_t>(y * width_ + x)];
+        }
+        frame << kClearLine << '\n';
+    }
+    frame << '\n' << status_ << kClearLine << '\n';
+    frame << "\x1b[J";  // șterge restul ecranului
+    std::cout << frame.str() << std::flush;
 }
 
 }  // namespace pacman
