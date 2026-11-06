@@ -1,0 +1,16 @@
+# Fișiere obiect și executabile
+build/
+*.o
+*.obj
+*.exe
+*.out
+*.d
+
+# Biblioteci compilate
+*.a
+*.lib
+*.dll
+*.so
+
+# Setări locale ale editorului
+.vscode/
