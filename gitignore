@@ -14,3 +14,7 @@ build/
 
 # Setări locale ale editorului
 .vscode/
+
+# Date generate de joc
+highscores.txt
+*.tmp

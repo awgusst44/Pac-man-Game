@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <iosfwd>
+#include <set>
+#include <string>
 #include <vector>
 
 namespace pacman {
@@ -122,6 +124,10 @@ struct Board {
     bool isWalkable(const Position& position, bool allowGhostHouse) const;
     // Numără celulele de un anumit tip.
     int count(CellType type) const;
+    // Pozițiile tuturor celulelor de un anumit tip (std::set, ordonate).
+    std::set<Position> positionsOf(CellType type) const;
+    // Celulele la care poate ajunge Pacman pornind de la start (parcurgere în lățime, cu tunel).
+    std::set<Position> reachableFrom(const Position& start) const;
 };
 
 struct Score {
@@ -176,10 +182,10 @@ Direction opposite(Direction dir);
 Position directionOffset(Direction dir);  // (dx, dy) pentru direcție
 Direction directionFromCommand(Command command);
 
-const char* toString(Direction dir);
-const char* toString(GameState state);
-const char* toString(GhostType type);
-const char* toString(GhostMode mode);
+std::string toString(Direction dir);
+std::string toString(GameState state);
+std::string toString(GhostType type);
+std::string toString(GhostMode mode);
 
 // Reprezentarea unei celule ca un caracter ('#', '.', 'o', '-', ' ') și invers.
 char toChar(CellType cell);

@@ -1,12 +1,16 @@
 #include "Types.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <initializer_list>
 #include <istream>
+#include <iterator>
 #include <limits>
 #include <ostream>
+#include <queue>
 #include <string>
+#include <tuple>
 
 namespace pacman {
 
@@ -44,7 +48,7 @@ Direction directionFromCommand(Command command) {
     }
 }
 
-const char* toString(Direction dir) {
+std::string toString(Direction dir) {
     switch (dir) {
         case Direction::Up:    return "Up";
         case Direction::Down:  return "Down";
@@ -54,7 +58,7 @@ const char* toString(Direction dir) {
     }
 }
 
-const char* toString(GameState state) {
+std::string toString(GameState state) {
     switch (state) {
         case GameState::Menu:    return "Menu";
         case GameState::Running: return "Running";
@@ -65,7 +69,7 @@ const char* toString(GameState state) {
     return "Unknown";
 }
 
-const char* toString(GhostType type) {
+std::string toString(GhostType type) {
     switch (type) {
         case GhostType::Blinky: return "Blinky";
         case GhostType::Pinky:  return "Pinky";
@@ -75,7 +79,7 @@ const char* toString(GhostType type) {
     return "Unknown";
 }
 
-const char* toString(GhostMode mode) {
+std::string toString(GhostMode mode) {
     switch (mode) {
         case GhostMode::Chase:      return "Chase";
         case GhostMode::Scatter:    return "Scatter";
@@ -128,7 +132,7 @@ Position& Position::operator=(const Position& other) {
 bool Position::operator==(const Position& other) const { return x == other.x && y == other.y; }
 bool Position::operator!=(const Position& other) const { return !(*this == other); }
 bool Position::operator<(const Position& other) const {
-    return x < other.x || (x == other.x && y < other.y);
+    return std::tie(x, y) < std::tie(other.x, other.y);  // comparare lexicografică
 }
 bool Position::operator>(const Position& other) const { return other < *this; }
 bool Position::operator<=(const Position& other) const { return !(other < *this); }
@@ -295,22 +299,29 @@ bool Ghost::isDangerous() const {
 Board::Board() : width(0), height(0), cells() {}
 
 Board::Board(int w, int h, CellType fill) : width(std::max(w, 0)), height(std::max(h, 0)), cells() {
-    cells.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), fill);
+    cells.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+    std::fill(cells.begin(), cells.end(), fill);  // umple grila
 }
 
-Board::Board(const Board& other) : width(other.width), height(other.height), cells(other.cells) {}
+Board::Board(const Board& other) : width(other.width), height(other.height), cells() {
+    cells.reserve(other.cells.size());
+    std::copy(other.cells.begin(), other.cells.end(), std::back_inserter(cells));  // copie profundă
+}
 
 Board& Board::operator=(const Board& other) {
     if (this != &other) {
         width = other.width;
         height = other.height;
-        cells = other.cells;  // copie profundă a vectorului
+        cells.clear();
+        cells.reserve(other.cells.size());
+        std::copy(other.cells.begin(), other.cells.end(), std::back_inserter(cells));
     }
     return *this;
 }
 
 bool Board::operator==(const Board& other) const {
-    return width == other.width && height == other.height && cells == other.cells;
+    return width == other.width && height == other.height &&
+           std::equal(cells.begin(), cells.end(), other.cells.begin(), other.cells.end());
 }
 bool Board::operator!=(const Board& other) const { return !(*this == other); }
 
@@ -338,6 +349,42 @@ int Board::count(CellType type) const {
     return static_cast<int>(std::count(cells.begin(), cells.end(), type));
 }
 
+std::set<Position> Board::positionsOf(CellType type) const {
+    std::set<Position> result;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            if (at(x, y) == type) {
+                result.insert(Position(x, y));
+            }
+        }
+    }
+    return result;
+}
+
+std::set<Position> Board::reachableFrom(const Position& start) const {
+    static const std::array<Direction, 4> directions{
+        {Direction::Up, Direction::Left, Direction::Down, Direction::Right}};
+
+    std::set<Position> reached;
+    if (!isWalkable(start, false)) {
+        return reached;
+    }
+    std::queue<Position> pending;
+    reached.insert(start);
+    pending.push(start);
+    while (!pending.empty()) {
+        const Position current = pending.front();
+        pending.pop();
+        for (Direction dir : directions) {
+            const Position next = wrap(current.moved(dir));
+            if (isWalkable(next, false) && reached.insert(next).second) {
+                pending.push(next);  // celulă nouă, încă nevizitată
+            }
+        }
+    }
+    return reached;
+}
+
 // ======================================================================
 //  Score
 // ======================================================================
@@ -361,7 +408,7 @@ bool Score::operator==(const Score& other) const {
 }
 bool Score::operator!=(const Score& other) const { return !(*this == other); }
 bool Score::operator<(const Score& other) const {
-    return current < other.current || (current == other.current && best < other.best);
+    return std::tie(current, best) < std::tie(other.current, other.best);
 }
 bool Score::operator>(const Score& other) const { return other < *this; }
 bool Score::operator<=(const Score& other) const { return !(other < *this); }
@@ -472,7 +519,7 @@ bool expectChar(std::istream& in, char expected) {
 }
 
 // Așteaptă un cuvânt-cheie anume; altfel setează failbit.
-bool expectKeyword(std::istream& in, const char* keyword) {
+bool expectKeyword(std::istream& in, const std::string& keyword) {
     std::string word;
     if (readWord(in, word) && word == keyword) {
         return true;
@@ -482,11 +529,11 @@ bool expectKeyword(std::istream& in, const char* keyword) {
 }
 
 // "nume=" (cuvânt-cheie urmat de '=').
-bool field(std::istream& in, const char* name) {
+bool field(std::istream& in, const std::string& name) {
     return expectKeyword(in, name) && expectChar(in, '=');
 }
 
-bool intField(std::istream& in, const char* name, int& value) {
+bool intField(std::istream& in, const std::string& name, int& value) {
     return field(in, name) && static_cast<bool>(in >> value);
 }
 
@@ -498,13 +545,13 @@ std::istream& readEnum(std::istream& in, E& out, std::initializer_list<E> values
         in.setstate(std::ios::failbit);
         return in;
     }
-    for (E value : values) {
-        if (word == toString(value)) {
-            out = value;
-            return in;
-        }
+    const auto found = std::find_if(values.begin(), values.end(),
+                                    [&word](E value) { return toString(value) == word; });
+    if (found == values.end()) {
+        in.setstate(std::ios::failbit);
+        return in;
     }
-    in.setstate(std::ios::failbit);
+    out = *found;
     return in;
 }
 

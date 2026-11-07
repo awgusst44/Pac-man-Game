@@ -16,7 +16,8 @@ BUILD  := build
 TARGET := $(BUILD)/pacman$(EXE)
 TEST   := $(BUILD)/smoke_test$(EXE)
 
-LIB_SRC := src/Types.cpp src/GameEngine.cpp src/Renderer.cpp src/Listener.cpp
+LIB_SRC := src/Types.cpp src/GameEngine.cpp src/Renderer.cpp src/Listener.cpp \
+           src/HighScores.cpp src/Game.cpp src/Demo.cpp
 LIB_OBJ := $(LIB_SRC:src/%.cpp=$(BUILD)/%.o)
 MAIN_OBJ := $(BUILD)/main.o
 TEST_OBJ := $(BUILD)/smoke_test.o

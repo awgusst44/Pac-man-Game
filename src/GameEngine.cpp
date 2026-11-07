@@ -2,7 +2,12 @@
 
 #include <algorithm>
 #include <array>
+#include <istream>
+#include <iterator>
+#include <map>
+#include <ostream>
 #include <queue>
+#include <set>
 #include <utility>
 
 namespace pacman {
@@ -10,67 +15,67 @@ namespace pacman {
 namespace {
 
 // Ordinea de prioritate la egalitate de distanță (ca în jocul original).
-constexpr std::array<Direction, 4> kDirections{Direction::Up, Direction::Left, Direction::Down,
-                                               Direction::Right};
+const std::array<Direction, 4> kDirections{
+    {Direction::Up, Direction::Left, Direction::Down, Direction::Right}};
 
 }  // namespace
 
-GameEngine::GameEngine(const GameConfig& config) : config_(config), rng_(std::random_device{}()) {
-    if (!config_.isValid()) {
-        config_ = GameConfig{};
+GameEngine::GameEngine(const GameConfig& config)
+    : GameEngine(std::make_shared<const GameConfig>(config)) {}
+
+GameEngine::GameEngine(std::shared_ptr<const GameConfig> config)
+    : config_(std::move(config)), rng_(std::random_device{}()) {
+    if (!config_ || !config_->isValid()) {
+        config_ = std::make_shared<const GameConfig>();  // configurație implicită
     }
 }
+
+// ---------- încărcarea nivelului ----------
 
 bool GameEngine::loadLevel(const std::vector<std::string>& layout) {
     if (layout.empty() || layout.front().empty()) {
         return false;
     }
     const std::size_t width = layout.front().size();
-    for (const std::string& row : layout) {
-        if (row.size() != width) {
-            return false;
-        }
+    const bool sameWidth = std::all_of(layout.begin(), layout.end(), [width](const std::string& row) {
+        return row.size() == width;
+    });
+    if (!sameWidth) {
+        return false;
     }
 
     Board board(static_cast<int>(width), static_cast<int>(layout.size()));
-    Pacman pacman;
     std::vector<Ghost> ghosts;
+    Position pacmanSpawn;
     bool pacmanFound = false;
-    int dots = 0;
 
     for (int y = 0; y < board.height; ++y) {
+        const std::string& row = layout[static_cast<std::size_t>(y)];
         for (int x = 0; x < board.width; ++x) {
-            const Position here{x, y};
-            switch (layout[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)]) {
+            const Position here(x, y);
+            switch (row[static_cast<std::size_t>(x)]) {
                 case '#':
                     board.at(x, y) = CellType::Wall;
                     break;
                 case '.':
                     board.at(x, y) = CellType::Dot;
-                    ++dots;
                     break;
                 case 'o':
                     board.at(x, y) = CellType::PowerPellet;
-                    ++dots;
                     break;
                 case '-':
                     board.at(x, y) = CellType::GhostHouse;
                     break;
-                case 'G': {
+                case 'G':
                     board.at(x, y) = CellType::GhostHouse;
-                    Ghost ghost;
-                    ghost.type = static_cast<GhostType>(ghosts.size() % 4);
-                    ghost.position = here;
-                    ghost.spawn = here;
-                    ghosts.push_back(ghost);
+                    ghosts.emplace_back(static_cast<GhostType>(ghosts.size() % 4), here);
                     break;
-                }
                 case 'P':
                     if (pacmanFound) {
                         return false;  // un singur Pacman
                     }
                     pacmanFound = true;
-                    pacman.spawn = here;
+                    pacmanSpawn = here;
                     break;
                 case ' ':
                     break;
@@ -83,16 +88,57 @@ bool GameEngine::loadLevel(const std::vector<std::string>& layout) {
         return false;
     }
 
+    // Toate punctele și bilele trebuie să poată fi mâncate: food ⊆ reachable.
+    const std::set<Position> dots = board.positionsOf(CellType::Dot);
+    const std::set<Position> pellets = board.positionsOf(CellType::PowerPellet);
+    std::set<Position> food;
+    std::set_union(dots.begin(), dots.end(), pellets.begin(), pellets.end(),
+                   std::inserter(food, food.begin()));
+    const std::set<Position> reachable = board.reachableFrom(pacmanSpawn);
+    if (!std::includes(reachable.begin(), reachable.end(), food.begin(), food.end())) {
+        return false;
+    }
+
     layout_ = layout;
     board_ = std::move(board);
-    pacman_ = pacman;
-    pacman_.reset(config_.initialLives);
+    pacman_ = Pacman(pacmanSpawn, config_->initialLives);
     ghosts_ = std::move(ghosts);
-    dotsRemaining_ = dots;
+    dotsRemaining_ = static_cast<int>(food.size());
     tick_ = 0;
     score_.reset();
     state_ = GameState::Menu;
     return true;
+}
+
+bool GameEngine::loadLevel(std::istream& in) {
+    std::vector<std::string> rows;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();  // fișiere cu sfârșit de linie Windows
+        }
+        if (!line.empty() && line.front() == ';') {
+            continue;  // comentariu
+        }
+        rows.push_back(line);
+    }
+
+    // Elimină rândurile goale de la început și de la sfârșit.
+    const auto isBlank = [](const std::string& row) { return row.empty(); };
+    rows.erase(rows.begin(), std::find_if_not(rows.begin(), rows.end(), isBlank));
+    rows.erase(std::find_if_not(rows.rbegin(), rows.rend(), isBlank).base(), rows.end());
+    if (rows.empty()) {
+        return false;
+    }
+
+    // Rândurile mai scurte (spațiile de la sfârșit pot dispărea la editare) se completează.
+    const std::size_t width = std::max_element(rows.begin(), rows.end(),
+                                               [](const std::string& a, const std::string& b) {
+                                                   return a.size() < b.size();
+                                               })->size();
+    std::for_each(rows.begin(), rows.end(), [width](std::string& row) { row.resize(width, ' '); });
+
+    return loadLevel(rows);
 }
 
 void GameEngine::start() {
@@ -161,13 +207,11 @@ void GameEngine::update() {
         return;
     }
 
-    if (tick_ % config_.ghostSpeedDivider == 0) {
+    if (tick_ % config_->ghostSpeedDivider == 0) {
         moveGhosts();
         checkCollisions();
     }
-    for (Ghost& ghost : ghosts_) {
-        ghost.tick();
-    }
+    std::for_each(ghosts_.begin(), ghosts_.end(), [](Ghost& ghost) { ghost.tick(); });
 }
 
 // ---------- mișcare ----------
@@ -208,7 +252,7 @@ void GameEngine::moveGhosts() {
     for (Ghost& ghost : ghosts_) {
         // Fantomele speriate se mișcă de două ori mai încet.
         if (ghost.mode == GhostMode::Frightened &&
-            tick_ % (2 * config_.ghostSpeedDivider) != 0) {
+            tick_ % (2 * config_->ghostSpeedDivider) != 0) {
             continue;
         }
         ghost.direction = chooseDirection(ghost);
@@ -223,13 +267,13 @@ void GameEngine::moveGhosts() {
 }
 
 void GameEngine::updateGhostModes() {
-    const int cycle = config_.scatterTicks + config_.chaseTicks;
-    const bool scatter = (tick_ % cycle) < config_.scatterTicks;
-    for (Ghost& ghost : ghosts_) {
+    const int cycle = config_->scatterTicks + config_->chaseTicks;
+    const bool scatter = (tick_ % cycle) < config_->scatterTicks;
+    std::for_each(ghosts_.begin(), ghosts_.end(), [scatter](Ghost& ghost) {
         if (ghost.mode == GhostMode::Chase || ghost.mode == GhostMode::Scatter) {
             ghost.mode = scatter ? GhostMode::Scatter : GhostMode::Chase;
         }
-    }
+    });
 }
 
 // ---------- inteligența fantomelor ----------
@@ -261,14 +305,11 @@ Position GameEngine::ghostTarget(const Ghost& ghost) const {
             return {pac.x + 4 * off.x, pac.y + 4 * off.y};  // 4 celule în fața lui Pacman
         case GhostType::Inky: {
             const Position ahead{pac.x + 2 * off.x, pac.y + 2 * off.y};
-            Position blinky = pac;
-            for (const Ghost& other : ghosts_) {
-                if (other.type == GhostType::Blinky) {
-                    blinky = other.position;
-                    break;
-                }
-            }
-            return {2 * ahead.x - blinky.x, 2 * ahead.y - blinky.y};  // simetric față de Blinky
+            const auto blinky = std::find_if(ghosts_.begin(), ghosts_.end(), [](const Ghost& g) {
+                return g.type == GhostType::Blinky;
+            });
+            const Position b = (blinky != ghosts_.end()) ? blinky->position : pac;
+            return {2 * ahead.x - b.x, 2 * ahead.y - b.y};  // simetric față de Blinky
         }
         case GhostType::Clyde:
             return ghost.position.distanceSquared(pac) > 64 ? pac : corner;
@@ -280,31 +321,26 @@ Direction GameEngine::bfsDirection(const Ghost& ghost, const Position& target) c
     if (ghost.position == target) {
         return Direction::None;
     }
-    const int w = board_.width;
-    const auto index = [w](const Position& p) { return static_cast<std::size_t>(p.y * w + p.x); };
+    // Pentru fiecare celulă vizitată: prima direcție de urmat din poziția fantomei spre ea.
+    std::map<Position, Direction> firstStep;
+    std::queue<Position> pending;
+    firstStep.emplace(ghost.position, Direction::None);
+    pending.push(ghost.position);
 
-    std::vector<bool> visited(static_cast<std::size_t>(w * board_.height), false);
-    std::vector<int> firstStep(visited.size(), 0);  // prima direcție spre fiecare celulă
-    std::queue<Position> queue;
-
-    visited[index(ghost.position)] = true;
-    queue.push(ghost.position);
-
-    while (!queue.empty()) {
-        const Position current = queue.front();
-        queue.pop();
+    while (!pending.empty()) {
+        const Position current = pending.front();
+        pending.pop();
         for (Direction dir : kDirections) {
             const Position next = step(current, dir);
-            if (!board_.isWalkable(next, true) || visited[index(next)]) {
+            if (!board_.isWalkable(next, true) || firstStep.count(next) > 0) {
                 continue;
             }
-            visited[index(next)] = true;
-            firstStep[index(next)] =
-                (current == ghost.position) ? static_cast<int>(dir) : firstStep[index(current)];
+            const Direction first = (current == ghost.position) ? dir : firstStep.at(current);
+            firstStep.emplace(next, first);
             if (next == target) {
-                return static_cast<Direction>(firstStep[index(next)]);
+                return first;
             }
-            queue.push(next);
+            pending.push(next);
         }
     }
     return Direction::None;
@@ -316,15 +352,12 @@ Direction GameEngine::chooseDirection(const Ghost& ghost) {
         return bfsDirection(ghost, ghost.spawn);
     }
 
+    // Direcțiile posibile: nu se întoarce pe loc și nu intră în perete.
     std::vector<Direction> options;
-    for (Direction dir : kDirections) {
-        if (dir == opposite(ghost.direction)) {
-            continue;  // nu se întoarce pe loc
-        }
-        if (canGhostMove(ghost, dir)) {
-            options.push_back(dir);
-        }
-    }
+    std::copy_if(kDirections.begin(), kDirections.end(), std::back_inserter(options),
+                 [&](Direction dir) {
+                     return dir != opposite(ghost.direction) && canGhostMove(ghost, dir);
+                 });
     if (options.empty()) {  // fund de sac: singura ieșire e înapoi
         const Direction back = opposite(ghost.direction);
         return canGhostMove(ghost, back) ? back : Direction::None;
@@ -335,17 +368,13 @@ Direction GameEngine::chooseDirection(const Ghost& ghost) {
         return options[pick(rng_)];
     }
 
+    // Alege direcția care apropie cel mai mult fantoma de țintă.
     const Position target = ghostTarget(ghost);
-    Direction best = options.front();
-    int bestDistance = step(ghost.position, best).distanceSquared(target);
-    for (Direction dir : options) {
-        const int distance = step(ghost.position, dir).distanceSquared(target);
-        if (distance < bestDistance) {
-            best = dir;
-            bestDistance = distance;
-        }
-    }
-    return best;
+    const auto distance = [&](Direction dir) {
+        return step(ghost.position, dir).distanceSquared(target);
+    };
+    return *std::min_element(options.begin(), options.end(),
+                             [&](Direction a, Direction b) { return distance(a) < distance(b); });
 }
 
 // ---------- reguli ----------
@@ -353,16 +382,16 @@ Direction GameEngine::chooseDirection(const Ghost& ghost) {
 void GameEngine::eatAt(const Position& position) {
     CellType& cell = board_.at(position.x, position.y);
     if (cell == CellType::Dot) {
-        score_.add(config_.dotPoints);
+        score_.add(config_->dotPoints);
         cell = CellType::Empty;
         --dotsRemaining_;
     } else if (cell == CellType::PowerPellet) {
-        score_.add(config_.powerPelletPoints);
+        score_.add(config_->powerPelletPoints);
         cell = CellType::Empty;
         --dotsRemaining_;
-        for (Ghost& ghost : ghosts_) {
-            ghost.frighten(config_.frightenedDuration);
-        }
+        const int duration = config_->frightenedDuration;
+        std::for_each(ghosts_.begin(), ghosts_.end(),
+                      [duration](Ghost& ghost) { ghost.frighten(duration); });
     }
     if (dotsRemaining_ <= 0 && state_ == GameState::Running) {
         state_ = GameState::Won;
@@ -379,7 +408,7 @@ void GameEngine::checkCollisions() {
         }
         if (ghost.isVulnerable()) {
             ghost.markEaten();
-            score_.add(config_.ghostPoints);
+            score_.add(config_->ghostPoints);
         } else if (ghost.isDangerous()) {
             loseLife();
             return;
@@ -394,9 +423,31 @@ void GameEngine::loseLife() {
         return;
     }
     pacman_.respawn();
-    for (Ghost& ghost : ghosts_) {
-        ghost.reset();
+    std::for_each(ghosts_.begin(), ghosts_.end(), [](Ghost& ghost) { ghost.reset(); });
+}
+
+// ---------- afișare ----------
+
+std::ostream& operator<<(std::ostream& out, const GameEngine& engine) {
+    const Board& board = engine.board();
+    const std::vector<Ghost>& ghosts = engine.ghosts();
+    for (int y = 0; y < board.height; ++y) {
+        for (int x = 0; x < board.width; ++x) {
+            const Position here(x, y);
+            const bool ghostHere = std::any_of(ghosts.begin(), ghosts.end(), [&here](const Ghost& g) {
+                return g.position == here;
+            });
+            if (engine.pacman().position == here) {
+                out << 'P';
+            } else if (ghostHere) {
+                out << 'G';
+            } else {
+                out << toChar(board.at(x, y));
+            }
+        }
+        out << '\n';
     }
+    return out;
 }
 
 }  // namespace pacman

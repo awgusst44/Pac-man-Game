@@ -1,5 +1,7 @@
 #pragma once
 
+#include <map>
+
 #include "Types.hpp"
 
 namespace pacman {
@@ -28,6 +30,8 @@ private:
     Command translateArrow(int code) const; // taste speciale (săgeți)
 
     bool rawModeActive_{false};
+    std::map<int, Command> keys_;    // tastă normală -> comandă
+    std::map<int, Command> arrows_;  // cod de săgeată -> comandă
 };
 
 }  // namespace pacman

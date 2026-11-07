@@ -1,12 +1,23 @@
 // Teste simple (fără biblioteci externe) pentru structurile și motorul Pacman.
+#include <algorithm>
+#include <array>
+#include <cstdio>
+#include <fstream>
 #include <iostream>
+#include <iterator>
+#include <map>
+#include <memory>
 #include <random>
+#include <stdexcept>
+#include <set>
 #include <sstream>
 #include <string>
 #include <type_traits>
 #include <vector>
 
+#include "Game.hpp"
 #include "GameEngine.hpp"
+#include "HighScores.hpp"
 #include "Renderer.hpp"
 #include "Types.hpp"
 
@@ -338,26 +349,41 @@ void testStreams() {
     CHECK(many && p1 == Position(1, 1) && s == Score(2, 3) && p2 == Position(4, 4));
 }
 
-// Desenator de test: înregistrează ordinea apelurilor.
+// Desenator de test: înregistrează ordinea apelurilor într-un jurnal partajat.
+// (Jurnalul este std::shared_ptr, ca testul să-l poată citi după ce desenatorul
+//  a fost mutat într-un Game.)
+using CallLog = std::shared_ptr<std::vector<std::string>>;
+
 class RecordingRenderer : public Renderer {
 public:
-    std::vector<std::string> calls;
-    int ghostsDrawn = 0;
+    explicit RecordingRenderer(CallLog log = std::make_shared<std::vector<std::string>>())
+        : log_(std::move(log)) {}
 
-    void init() override { calls.push_back("init"); }
-    void shutdown() override { calls.push_back("shutdown"); }
+    void init() override { log_->push_back("init"); }
+    void shutdown() override { log_->push_back("shutdown"); }
 
 protected:
-    void beginFrame() override { calls.push_back("begin"); }
-    void drawBoard(const Board&) override { calls.push_back("board"); }
-    void drawPacman(const Pacman&) override { calls.push_back("pacman"); }
-    void drawGhost(const Ghost&) override {
-        ++ghostsDrawn;
-        calls.push_back("ghost");
-    }
-    void drawHud(const Score&, int, int) override { calls.push_back("hud"); }
-    void drawStatus(GameState, const Score&) override { calls.push_back("status"); }
-    void endFrame() override { calls.push_back("end"); }
+    void beginFrame() override { log_->push_back("begin"); }
+    void drawBoard(const Board&) override { log_->push_back("board"); }
+    void drawPacman(const Pacman&) override { log_->push_back("pacman"); }
+    void drawGhost(const Ghost&) override { log_->push_back("ghost"); }
+    void drawHud(const Score&, int, int) override { log_->push_back("hud"); }
+    void drawStatus(GameState, const Score&) override { log_->push_back("status"); }
+    void endFrame() override { log_->push_back("end"); }
+
+private:
+    CallLog log_;
+};
+
+// Ascultător de test: returnează comenzi dintr-un scenariu.
+class ScriptedListener : public Listener {
+public:
+    explicit ScriptedListener(std::vector<Command> script) : script_(std::move(script)) {}
+    Command poll() override { return index_ < script_.size() ? script_[index_++] : Command::None; }
+
+private:
+    std::vector<Command> script_;
+    std::size_t index_{0};
 };
 
 static_assert(std::is_abstract<Renderer>::value, "Renderer trebuie sa fie clasa abstracta");
@@ -370,21 +396,264 @@ void testAbstractRenderer() {
     GameEngine engine;
     CHECK(engine.loadLevel({"#####", "#PGG#", "#...#", "#####"}));
 
-    RecordingRenderer recorder;
-    Renderer& renderer = recorder;  // utilizare polimorfă prin clasa abstractă
+    CallLog log = std::make_shared<std::vector<std::string>>();
+    RecordingRenderer recorder(log);
+    Renderer& renderer = recorder;  // utilizare polimorfă prin referință la clasa abstractă
     renderer.init();
     renderer.render(engine);
     renderer.shutdown();
 
     const std::vector<std::string> expected = {"init",   "begin",  "board", "ghost", "ghost",
                                                "pacman", "hud",    "status", "end",  "shutdown"};
-    CHECK(recorder.calls == expected);
-    CHECK(recorder.ghostsDrawn == 2);
+    CHECK(*log == expected);
 
-    // prin pointer la bază, cu destructor virtual
-    Renderer* heap = new RecordingRenderer();
-    heap->render(engine);
-    delete heap;
+    // prin smart pointer la bază (destructor virtual => ștergere corectă, fără delete manual)
+    CallLog log2 = std::make_shared<std::vector<std::string>>();
+    std::unique_ptr<Renderer> owned = std::make_unique<RecordingRenderer>(log2);
+    owned->render(engine);
+    CHECK(log2->size() == 8);
+}
+
+void testStringsAndAlgorithms() {
+    // toString întoarce std::string
+    const std::string left = toString(Direction::Left);
+    CHECK(left == "Left");
+    CHECK(std::string(toString(GhostMode::Frightened)) + "!" == "Frightened!");
+
+    // Board: copiere cu std::copy, comparare cu std::equal
+    Board a(3, 3, CellType::Dot);
+    Board b(a);
+    CHECK(a == b);
+    b.at(2, 2) = CellType::Empty;
+    CHECK(a != b);
+    CHECK(std::count(b.cells.begin(), b.cells.end(), CellType::Dot) == 8);
+
+    // Board::positionsOf (std::set) și reachableFrom (parcurgere în lățime cu tunel)
+    GameEngine engine;
+    CHECK(engine.loadLevel({"#####", "#Po.#", "#####"}));
+    const std::set<Position> dots = engine.board().positionsOf(CellType::Dot);
+    CHECK(dots.size() == 1 && *dots.begin() == Position(3, 1));
+    const std::set<Position> reach = engine.board().reachableFrom(engine.pacman().position);
+    CHECK(reach.size() == 3);
+    CHECK(std::includes(reach.begin(), reach.end(), dots.begin(), dots.end()));
+
+    // tunelul: rândul 1 are marginile deschise, deci celula 3 se atinge și prin stânga
+    CHECK(engine.loadLevel({"#####", " P.. ", "#####"}));
+    const std::set<Position> tunnel = engine.board().reachableFrom(Position(1, 1));
+    CHECK(tunnel.count(Position(4, 1)) == 1 && tunnel.count(Position(0, 1)) == 1);
+
+    // Position ca cheie în std::map și std::set (folosește operator<)
+    std::map<Position, int> visits;
+    ++visits[Position(1, 2)];
+    ++visits[Position(1, 2)];
+    ++visits[Position(0, 5)];
+    CHECK(visits.size() == 2 && visits.at(Position(1, 2)) == 2);
+    CHECK(visits.begin()->first == Position(0, 5));  // ordonat
+
+    // std::sort + std::find_if pe fantome
+    std::vector<Ghost> ghosts{Ghost(GhostType::Clyde, Position(5, 0)),
+                              Ghost(GhostType::Blinky, Position(1, 0)),
+                              Ghost(GhostType::Pinky, Position(3, 0))};
+    std::sort(ghosts.begin(), ghosts.end(),
+              [](const Ghost& x, const Ghost& y) { return x.position < y.position; });
+    CHECK(ghosts.front().type == GhostType::Blinky && ghosts.back().type == GhostType::Clyde);
+    const auto pinky = std::find_if(ghosts.begin(), ghosts.end(),
+                                    [](const Ghost& g) { return g.type == GhostType::Pinky; });
+    CHECK(pinky != ghosts.end() && pinky->position == Position(3, 0));
+    CHECK(std::any_of(ghosts.begin(), ghosts.end(), [](const Ghost& g) { return g.isDangerous(); }));
+    CHECK(std::none_of(ghosts.begin(), ghosts.end(), [](const Ghost& g) { return g.isVulnerable(); }));
+}
+
+void testLevelFromStream() {
+    const std::vector<std::string> layout = Game::defaultLevel();
+
+    // scrierea motorului în formatul nivelului reproduce șablonul (stream round trip)
+    GameEngine engine;
+    CHECK(engine.loadLevel(layout));
+    std::ostringstream dump;
+    dump << engine;
+    std::string expected;
+    for (const std::string& row : layout) {
+        expected += row + "\n";
+    }
+    CHECK(dump.str() == expected);
+
+    // citire din flux, cu comentarii, sfârșit de linie Windows și rânduri goale la capete
+    std::istringstream text("; comentariu\r\n\r\n#####\r\n#P.o#\r\n#####\r\n\r\n");
+    GameEngine fromStream;
+    CHECK(fromStream.loadLevel(text));
+    CHECK(fromStream.board().width == 5 && fromStream.board().height == 3);
+    CHECK(fromStream.dotsRemaining() == 2);
+
+    // rândurile scurte se completează cu spații (spațiile de la capăt pot dispărea la editare)
+    std::istringstream ragged("#####\n#P.#\n#####\n");
+    GameEngine padded;
+    CHECK(padded.loadLevel(ragged));
+    CHECK(padded.board().width == 5 && padded.board().at(4, 1) == CellType::Empty);
+
+    // flux gol / fără Pacman / cu caractere greșite
+    std::istringstream empty("");
+    CHECK(!padded.loadLevel(empty));
+    std::istringstream noPacman("###\n#.#\n###\n");
+    CHECK(!padded.loadLevel(noPacman));
+
+    // nivel nejucabil: punct izolat de pereți => respins
+    CHECK(!padded.loadLevel(std::vector<std::string>{"#####", "#P#.#", "#####"}));
+
+    // fișierul levels/level1.txt (dacă testele rulează din rădăcina proiectului)
+    std::ifstream file("levels/level1.txt");
+    if (file) {
+        GameEngine fromFile;
+        CHECK(fromFile.loadLevel(file));
+        std::ostringstream fileDump;
+        fileDump << fromFile;
+        CHECK(fileDump.str() == expected);
+    } else {
+        std::cerr << "(avertisment) levels/level1.txt nu a fost gasit; rulati testele din radacina proiectului\n";
+    }
+}
+
+void testHighScores() {
+    HighScores table(3);
+    CHECK(table.empty() && !table.best().has_value());
+    CHECK(!table.add("Zero", 0));  // scorul 0 nu intră
+    CHECK(table.add("Ana", 300));
+    CHECK(table.add("Bob", 900));
+    CHECK(table.add("Cris", 600));
+    CHECK(table.entries().size() == 3);
+    CHECK(table.entries().front() == ScoreEntry("Bob", 900));
+    CHECK(table.entries().back() == ScoreEntry("Ana", 300));
+    CHECK(table.best().has_value() && table.best()->name == "Bob");
+    CHECK(table.rankOf("Cris") == 2 && table.rankOf("Nimeni") == 0);
+    CHECK(table.total() == 1800);
+
+    // tabela e plină: 200 nu intră, 700 scoate ultimul loc
+    CHECK(!table.qualifies(200) && !table.add("Dan", 200));
+    CHECK(table.qualifies(700) && table.add("Dan", 700));
+    CHECK(table.entries().size() == 3);
+    CHECK(table.rankOf("Ana") == 0);  // a fost eliminat
+    CHECK(table.entries()[1].name == "Dan");
+
+    // același jucător, mai multe scoruri
+    HighScores multi(5);
+    multi.add("Eli", 100);
+    multi.add("Eli", 500);
+    multi.add("Fay", 300);
+    CHECK(multi.forPlayer("Eli").size() == 2);
+    CHECK(multi.forPlayer("Eli").front().score == 500);
+
+    // nume: spațiile devin '_', numele gol devine "Player", lungimea e limitată
+    CHECK(HighScores::sanitizeName("Ana Maria") == "Ana_Maria");
+    CHECK(HighScores::sanitizeName("") == "Player");
+    CHECK(HighScores::sanitizeName("UnNumeFoarteLungDeTot").size() == 12);
+
+    // salvare / încărcare prin fluxuri
+    std::stringstream stream;
+    table.save(stream);
+    HighScores restored(3);
+    restored.load(stream);
+    CHECK(restored == table);
+
+    // încărcarea ordonează, taie la capacitate și ignoră intrările greșite
+    std::istringstream messy("Ana 100\nBob 900\nCris 500\nDan 300\nEli -5\n");
+    HighScores loaded(3);
+    loaded.load(messy);
+    CHECK(loaded.entries().size() == 3 && loaded.entries()[0].name == "Bob" &&
+          loaded.entries()[1].name == "Cris" && loaded.entries()[2].name == "Dan");
+
+    // ScoreEntry prin operatori de flux și iteratori de flux
+    std::istringstream entriesText("Ana 10 Bob 20 Cris 30");
+    std::vector<ScoreEntry> all((std::istream_iterator<ScoreEntry>(entriesText)),
+                                std::istream_iterator<ScoreEntry>());
+    CHECK(all.size() == 3 && all[2] == ScoreEntry("Cris", 30));
+    std::ostringstream out;
+    std::copy(all.begin(), all.end(), std::ostream_iterator<ScoreEntry>(out, ";"));
+    CHECK(out.str() == "Ana 10;Bob 20;Cris 30;");
+
+    // fișier real
+    const std::string path = "smoke_highscores.tmp";
+    CHECK(table.saveToFile(path));
+    HighScores fromFile(3);
+    CHECK(fromFile.loadFromFile(path) && fromFile == table);
+    std::remove(path.c_str());
+    CHECK(!fromFile.loadFromFile("fisier_care_nu_exista.tmp"));
+
+    // afișare tabel
+    std::ostringstream printed;
+    table.print(printed);
+    CHECK(printed.str().find("Bob") != std::string::npos && printed.str().find("900") != std::string::npos);
+}
+
+void testGameWithSmartPointers() {
+    CallLog log = std::make_shared<std::vector<std::string>>();
+    const std::string scoresPath = "smoke_game_scores.tmp";
+    std::remove(scoresPath.c_str());
+
+    // Game primește Renderer și Listener prin unique_ptr (proprietate transmisă prin std::move)
+    auto config = std::make_shared<const GameConfig>();
+    Game game(std::make_unique<RecordingRenderer>(log),
+              std::make_unique<ScriptedListener>(std::vector<Command>{Command::MoveRight}), config,
+              "Tester Unu");
+    CHECK(game.playerName() == "Tester_Unu");
+    CHECK(config.use_count() >= 3);  // partajată între main, Game și GameEngine
+    CHECK(!game.setScoresFile(scoresPath));  // fișierul nu există încă
+    CHECK(game.loadLevel({"#####", "#P..#", "#####"}));
+
+    game.step();
+    CHECK(game.engine().isRunning());
+    game.step();
+    CHECK(game.engine().state() == GameState::Won);
+    CHECK(game.engine().score().current == 20);
+    CHECK(game.highScores().entries().size() == 1);
+    CHECK(game.highScores().entries().front() == ScoreEntry("Tester_Unu", 20));
+    game.step();  // fără comenzi: scorul nu se înregistrează a doua oară
+    CHECK(game.highScores().entries().size() == 1);
+    CHECK(std::count(log->begin(), log->end(), "begin") == 3);  // câte un cadru la fiecare pas
+
+    // scorul a fost scris în fișier
+    HighScores onDisk;
+    CHECK(onDisk.loadFromFile(scoresPath) && onDisk.entries().size() == 1);
+    std::remove(scoresPath.c_str());
+
+    // joc întrerupt cu Q: finish() înregistrează scorul obținut până atunci
+    Game quitter(std::make_unique<RecordingRenderer>(),
+                 std::make_unique<ScriptedListener>(
+                     std::vector<Command>{Command::MoveRight, Command::None, Command::Quit}),
+                 nullptr, "Q");
+    CHECK(quitter.loadLevel({"#########", "#P......#", "#########"}));
+    quitter.step();
+    quitter.step();
+    quitter.step();
+    CHECK(quitter.engine().quitRequested());
+    quitter.finish();
+    CHECK(quitter.engine().isRunning());  // jocul nu s-a terminat singur
+    CHECK(quitter.highScores().entries().size() == 1 && quitter.highScores().best()->score == 30);
+
+    // Renderer / Listener nuli => excepție
+    bool thrown = false;
+    try {
+        Game bad(nullptr, std::make_unique<ScriptedListener>(std::vector<Command>{}), nullptr, "X");
+    } catch (const std::invalid_argument&) {
+        thrown = true;
+    }
+    CHECK(thrown);
+}
+
+void testSharedConfig() {
+    auto config = std::make_shared<const GameConfig>(2, 10, 1, 2, 3);
+    GameEngine first(config);
+    GameEngine second(config);
+    CHECK(&first.config() == &second.config());  // același obiect, fără copii
+    CHECK(first.config().initialLives == 2);
+
+    auto invalid = std::make_shared<GameConfig>();
+    invalid->initialLives = 0;
+    const std::shared_ptr<const GameConfig> invalidConst = invalid;
+    GameEngine fallback(invalidConst);
+    CHECK(fallback.config().isValid());  // configurația greșită este înlocuită cu cea implicită
+    const std::shared_ptr<const GameConfig> nothing;
+    GameEngine nullConfig(nothing);
+    CHECK(nullConfig.config().isValid());
 }
 
 void testWin() {
@@ -451,8 +720,9 @@ void testRandomPlay() {
     CHECK(engine.ghosts().size() == 3);
 
     std::mt19937 rng(12345);
-    const Command commands[] = {Command::MoveUp, Command::MoveDown, Command::MoveLeft,
-                                Command::MoveRight, Command::Pause, Command::None, Command::None};
+    const std::array<Command, 7> commands{{Command::MoveUp, Command::MoveDown, Command::MoveLeft,
+                                           Command::MoveRight, Command::Pause, Command::None,
+                                           Command::None}};
     for (int i = 0; i < 30000; ++i) {
         engine.handleCommand(commands[rng() % 7]);
         engine.update();
@@ -489,6 +759,11 @@ int main() {
     testComparison();
     testStreams();
     testAbstractRenderer();
+    testStringsAndAlgorithms();
+    testLevelFromStream();
+    testHighScores();
+    testGameWithSmartPointers();
+    testSharedConfig();
     testLoadLevel();
     testWin();
     testPauseAndQuit();

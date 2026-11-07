@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <sstream>
+#include <string>
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -33,17 +34,17 @@ void Renderer::render(const GameEngine& engine) {
 namespace {
 
 // Coduri ANSI pentru culori (funcționează în Windows Terminal / PowerShell / Linux).
-constexpr const char* kReset = "\x1b[0m";
-constexpr const char* kWall = "\x1b[34;1m";
-constexpr const char* kDot = "\x1b[37m";
-constexpr const char* kPellet = "\x1b[97;1m";
-constexpr const char* kHouse = "\x1b[90m";
-constexpr const char* kPacman = "\x1b[93;1m";
-constexpr const char* kFrightened = "\x1b[97;44m";
-constexpr const char* kEaten = "\x1b[90m";
-constexpr const char* kClearLine = "\x1b[K";
+const std::string kReset = "\x1b[0m";
+const std::string kWall = "\x1b[34;1m";
+const std::string kDot = "\x1b[37m";
+const std::string kPellet = "\x1b[97;1m";
+const std::string kHouse = "\x1b[90m";
+const std::string kPacman = "\x1b[93;1m";
+const std::string kFrightened = "\x1b[97;44m";
+const std::string kEaten = "\x1b[90m";
+const std::string kClearLine = "\x1b[K";
 
-const char* ghostColor(GhostType type) {
+std::string ghostColor(GhostType type) {
     switch (type) {
         case GhostType::Blinky: return "\x1b[91;1m";  // roșu
         case GhostType::Pinky:  return "\x1b[95;1m";  // roz
@@ -55,10 +56,10 @@ const char* ghostColor(GhostType type) {
 
 std::string cellSymbol(CellType cell) {
     switch (cell) {
-        case CellType::Wall:        return std::string(kWall) + "#" + kReset;
-        case CellType::Dot:         return std::string(kDot) + "." + kReset;
-        case CellType::PowerPellet: return std::string(kPellet) + "o" + kReset;
-        case CellType::GhostHouse:  return std::string(kHouse) + "-" + kReset;
+        case CellType::Wall:        return kWall + "#" + kReset;
+        case CellType::Dot:         return kDot + "." + kReset;
+        case CellType::PowerPellet: return kPellet + "o" + kReset;
+        case CellType::GhostHouse:  return kHouse + "-" + kReset;
         case CellType::Empty:       return " ";
     }
     return " ";
@@ -111,19 +112,19 @@ void ConsoleRenderer::put(const Position& position, const std::string& symbol) {
 }
 
 void ConsoleRenderer::drawPacman(const Pacman& pacman) {
-    put(pacman.position, std::string(kPacman) + "C" + kReset);
+    put(pacman.position, kPacman + "C" + kReset);
 }
 
 void ConsoleRenderer::drawGhost(const Ghost& ghost) {
     switch (ghost.mode) {
         case GhostMode::Frightened:
-            put(ghost.position, std::string(kFrightened) + "w" + kReset);
+            put(ghost.position, kFrightened + "w" + kReset);
             break;
         case GhostMode::Eaten:
-            put(ghost.position, std::string(kEaten) + "e" + kReset);
+            put(ghost.position, kEaten + "e" + kReset);
             break;
         default:
-            put(ghost.position, std::string(ghostColor(ghost.type)) + "G" + kReset);
+            put(ghost.position, ghostColor(ghost.type) + "G" + kReset);
             break;
     }
 }

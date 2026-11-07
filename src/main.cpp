@@ -1,143 +1,93 @@
-#include <chrono>
-#include <cstring>
+#include <algorithm>
+#include <fstream>
 #include <iostream>
-#include <sstream>
+#include <memory>
 #include <string>
-#include <thread>
-#include <type_traits>
 #include <vector>
 
-#include "GameEngine.hpp"
+#include "Demo.hpp"
+#include "Game.hpp"
+#include "HighScores.hpp"
 #include "Listener.hpp"
 #include "Renderer.hpp"
-#include "Types.hpp"
 
 namespace {
 
-// '#' perete, '.' punct, 'o' bilă de putere, 'P' Pacman, 'G' fantomă, ' ' gol
-std::vector<std::string> defaultLevel() {
-    return {
-        "#####################",
-        "#o........#........o#",
-        "#.###.###.#.###.###.#",
-        "#...................#",
-        "#.###.#.#####.#.###.#",
-        "#.....#...#...#.....#",
-        "#####.### # ###.#####",
-        "     .  #GGG#  .     ",
-        "#####.# ##### #.#####",
-        "#.....#...#...#.....#",
-        "#.###.###.#.###.###.#",
-        "#o..#.....P.....#..o#",
-        "#.###.#.#####.#.###.#",
-        "#...................#",
-        "#####################",
-    };
+using Args = std::vector<std::string>;
+
+bool hasFlag(const Args& args, const std::string& flag) {
+    return std::find(args.begin(), args.end(), flag) != args.end();
 }
 
-// Demonstrație pentru laborator: constructori, atribuire, comparare, intrare/ieșire.
-// Pornire:  pacman --demo
-int runDemo() {
-    using namespace pacman;
-    std::cout << std::boolalpha;
+// Valoarea de după o opțiune (ex. "--level fisier.txt"), sau valoarea implicită.
+std::string optionValue(const Args& args, const std::string& option, const std::string& fallback) {
+    const auto found = std::find(args.begin(), args.end(), option);
+    if (found == args.end() || std::next(found) == args.end()) {
+        return fallback;
+    }
+    return *std::next(found);
+}
 
-    std::cout << "=== 1. Constructori si atribuire ===\n";
-    Position a;                 // constructor implicit
-    Position b(3, 4);           // constructor cu parametri
-    Position c(b);              // constructor de copiere
-    std::cout << "a = " << a << "   b = " << b << "   c = " << c << "\n";
-    a = b;                      // operator de atribuire
-    std::cout << "dupa a = b:  a = " << a << "\n";
-
-    Pacman pacman(Position(10, 11), 2);
-    Pacman pacmanCopy(pacman);
-    pacmanCopy.loseLife();
-    std::cout << pacman << "\n" << pacmanCopy << "   (copia e independenta)\n";
-
-    Ghost ghost(GhostType::Pinky, Position(5, 6));
-    Ghost ghostCopy;
-    ghostCopy = ghost;
-    std::cout << ghost << "\n" << ghostCopy << "\n";
-
-    Board board(4, 2, CellType::Dot);
-    Board boardCopy(board);     // copie profunda
-    boardCopy.at(0, 0) = CellType::Wall;
-    std::cout << "board:\n" << board << "boardCopy (modificat):\n" << boardCopy;
-
-    Score s1(100, 500);
-    Score s2;
-    s2 = s1;
-    GameConfig config(5, 60, 10, 50, 200);
-    std::cout << s1 << "\n" << s2 << "\n" << config << "\n\n";
-
-    std::cout << "=== 2. Operatori de comparare ===\n";
-    std::cout << "b == c            -> " << (b == c) << "\n";
-    std::cout << "b != Position(0,0) -> " << (b != Position(0, 0)) << "\n";
-    std::cout << "Position(1,9) < Position(2,0) -> " << (Position(1, 9) < Position(2, 0)) << "\n";
-    std::cout << "pacman == pacmanCopy -> " << (pacman == pacmanCopy) << "\n";
-    std::cout << "ghost == ghostCopy   -> " << (ghost == ghostCopy) << "\n";
-    std::cout << "board == boardCopy   -> " << (board == boardCopy) << "\n";
-    std::cout << "Score(100,500) > Score(50,500) -> " << (Score(100, 500) > Score(50, 500)) << "\n\n";
-
-    std::cout << "=== 3. Operatori de intrare / iesire ===\n";
-    std::stringstream stream;
-    stream << pacman;           // ieșire în stream
-    Pacman restored;
-    stream >> restored;         // intrare din stream
-    std::cout << "scris si citit inapoi: " << restored << "\n";
-    std::cout << "identic cu originalul: " << (restored == pacman) << "\n";
-
-    std::istringstream ghostText(
-        "Ghost type=Inky mode=Frightened pos=(1,2) spawn=(3,4) dir=Left frightened=12");
-    Ghost parsed;
-    ghostText >> parsed;
-    std::cout << "citit din text:        " << parsed << "\n";
-
-    std::istringstream boardText("Board 5x3\n#####\n#o.-#\n#####\n");
-    Board parsedBoard;
-    boardText >> parsedBoard;
-    std::cout << "grila citita:\n" << parsedBoard;
-
-    std::istringstream bad("(7;8)");
-    Position unchanged(1, 1);
-    bad >> unchanged;
-    std::cout << "format gresit '(7;8)': citire reusita = " << static_cast<bool>(bad)
-              << ", obiectul ramane " << unchanged << "\n\n";
-
-    std::cout << "=== 4. Clasa abstracta Renderer ===\n";
-    std::cout << "Renderer este abstract:      " << std::is_abstract<Renderer>::value << "\n";
-    std::cout << "ConsoleRenderer e abstract:  " << std::is_abstract<ConsoleRenderer>::value << "\n";
-    std::cout << "(Renderer r; nu compileaza; se poate folosi doar prin Renderer& / Renderer*)\n";
-    return 0;
+void printHelp() {
+    std::cout << "Pacman\n"
+                 "  pacman                    porneste jocul\n"
+                 "  pacman --level <fisier>   incarca nivelul din fisier (implicit levels/level1.txt)\n"
+                 "  pacman --name <nume>      numele jucatorului in tabela de scoruri\n"
+                 "  pacman --scores           afiseaza tabela de scoruri si iese\n"
+                 "  pacman --demo             demonstratie (constructori, STL, fluxuri, smart pointers)\n"
+                 "  pacman --help             acest mesaj\n";
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc > 1 && std::strcmp(argv[1], "--demo") == 0) {
-        return runDemo();
-    }
-
     using namespace pacman;
 
-    const GameConfig config;
-    GameEngine engine(config);
-    if (!engine.loadLevel(defaultLevel())) {
+    const Args args(argv + 1, argv + argc);
+    const std::string scoresPath = optionValue(args, "--scores-file", "highscores.txt");
+
+    if (hasFlag(args, "--help")) {
+        printHelp();
+        return 0;
+    }
+    if (hasFlag(args, "--demo")) {
+        return runDemo(std::cout);
+    }
+    if (hasFlag(args, "--scores")) {
+        HighScores table;
+        table.loadFromFile(scoresPath);
+        table.print(std::cout);
+        return 0;
+    }
+
+    auto config = std::make_shared<const GameConfig>();
+    Game game(std::make_unique<ConsoleRenderer>(), std::make_unique<ConsoleListener>(), config,
+              optionValue(args, "--name", "Player"));
+
+    // Nivelul: din fișier (flux de intrare), altfel cel încorporat.
+    const bool levelRequested = hasFlag(args, "--level");
+    const std::string levelPath = optionValue(args, "--level", "levels/level1.txt");
+    std::ifstream levelFile(levelPath);
+    bool loaded = false;
+    if (levelFile) {
+        loaded = game.loadLevel(levelFile);
+        if (!loaded) {
+            std::cerr << "Nivelul din '" << levelPath << "' este invalid.\n";
+            return 1;
+        }
+    } else if (levelRequested) {
+        std::cerr << "Nu pot deschide nivelul '" << levelPath << "'.\n";
+        return 1;
+    } else {
+        loaded = game.loadLevel(Game::defaultLevel());
+    }
+    if (!loaded) {
         std::cerr << "Nivelul nu a putut fi incarcat.\n";
         return 1;
     }
 
-    ConsoleRenderer consoleRenderer;
-    Renderer& renderer = consoleRenderer;  // codul de joc depinde doar de clasa abstractă
-    ConsoleListener listener;
-
-    renderer.init();
-    while (!engine.quitRequested()) {
-        engine.handleCommand(listener.poll());
-        engine.update();
-        renderer.render(engine);
-        std::this_thread::sleep_for(std::chrono::milliseconds(config.tickMillis));
-    }
-    renderer.shutdown();
+    game.setScoresFile(scoresPath);
+    game.run();
+    game.highScores().print(std::cout);
     return 0;
 }

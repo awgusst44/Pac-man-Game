@@ -5,6 +5,7 @@
 #ifdef _WIN32
 #include <conio.h>
 #else
+#include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
 #endif
@@ -13,11 +14,39 @@ namespace pacman {
 
 #ifndef _WIN32
 namespace {
+
 termios g_savedTerminal;  // setările inițiale ale terminalului
+
+// Este un octet gata de citit? (nu blochează, nici când intrarea e o conductă, nu un terminal)
+bool byteAvailable() {
+    fd_set set;
+    FD_ZERO(&set);
+    FD_SET(STDIN_FILENO, &set);
+    timeval noWait{0, 0};
+    return select(STDIN_FILENO + 1, &set, nullptr, nullptr, &noWait) > 0;
+}
+
 }  // namespace
 #endif
 
-ConsoleListener::ConsoleListener() {
+ConsoleListener::ConsoleListener()
+    : keys_{{'w', Command::MoveUp},
+            {'a', Command::MoveLeft},
+            {'s', Command::MoveDown},
+            {'d', Command::MoveRight},
+            {'p', Command::Pause},
+            {'q', Command::Quit}} {
+#ifdef _WIN32
+    arrows_ = {{72, Command::MoveUp},    // coduri _getch() după prefixul 0 / 224
+               {80, Command::MoveDown},
+               {75, Command::MoveLeft},
+               {77, Command::MoveRight}};
+#else
+    arrows_ = {{'A', Command::MoveUp},   // secvența ESC [ A/B/C/D
+               {'B', Command::MoveDown},
+               {'D', Command::MoveLeft},
+               {'C', Command::MoveRight}};
+#endif
 #ifndef _WIN32
     if (tcgetattr(STDIN_FILENO, &g_savedTerminal) == 0) {
         termios raw = g_savedTerminal;
@@ -41,35 +70,13 @@ Command ConsoleListener::translate(int key) const {
     if (key < 0 || key > 255) {
         return Command::None;
     }
-    switch (std::tolower(key)) {
-        case 'w': return Command::MoveUp;
-        case 'a': return Command::MoveLeft;
-        case 's': return Command::MoveDown;
-        case 'd': return Command::MoveRight;
-        case 'p': return Command::Pause;
-        case 'q': return Command::Quit;
-        default:  return Command::None;
-    }
+    const auto found = keys_.find(std::tolower(key));
+    return found != keys_.end() ? found->second : Command::None;
 }
 
 Command ConsoleListener::translateArrow(int code) const {
-#ifdef _WIN32
-    switch (code) {  // coduri _getch() după prefixul 0 / 224
-        case 72: return Command::MoveUp;
-        case 80: return Command::MoveDown;
-        case 75: return Command::MoveLeft;
-        case 77: return Command::MoveRight;
-        default: return Command::None;
-    }
-#else
-    switch (code) {  // secvența ESC [ A/B/C/D
-        case 'A': return Command::MoveUp;
-        case 'B': return Command::MoveDown;
-        case 'D': return Command::MoveLeft;
-        case 'C': return Command::MoveRight;
-        default:  return Command::None;
-    }
-#endif
+    const auto found = arrows_.find(code);
+    return found != arrows_.end() ? found->second : Command::None;
 }
 
 Command ConsoleListener::poll() {
@@ -86,13 +93,13 @@ Command ConsoleListener::poll() {
     }
 #else
     unsigned char ch = 0;
-    while (read(STDIN_FILENO, &ch, 1) == 1) {
+    while (byteAvailable() && read(STDIN_FILENO, &ch, 1) == 1) {
         Command command = Command::None;
         if (ch == 27) {  // ESC: posibilă săgeată
             unsigned char bracket = 0;
             unsigned char code = 0;
-            if (read(STDIN_FILENO, &bracket, 1) == 1 && bracket == '[' &&
-                read(STDIN_FILENO, &code, 1) == 1) {
+            if (byteAvailable() && read(STDIN_FILENO, &bracket, 1) == 1 && bracket == '[' &&
+                byteAvailable() && read(STDIN_FILENO, &code, 1) == 1) {
                 command = translateArrow(code);
             }
         } else {

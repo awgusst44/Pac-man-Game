@@ -8,11 +8,13 @@ setlocal
 
 set CXX=g++
 set CXXFLAGS=-std=c++17 -Wall -Wextra -Wpedantic -O2 -Iinclude
+set MODULES=Types GameEngine Renderer Listener HighScores Game Demo
+set OBJS=build\Types.o build\GameEngine.o build\Renderer.o build\Listener.o build\HighScores.o build\Game.o build\Demo.o
 
 if /I "%1"=="clean" goto clean
 if not exist build mkdir build
 
-for %%f in (Types GameEngine Renderer Listener) do (
+for %%f in (%MODULES%) do (
     echo [CXX] src\%%f.cpp
     %CXX% %CXXFLAGS% -c src\%%f.cpp -o build\%%f.o
     if errorlevel 1 goto error
@@ -25,7 +27,7 @@ echo [CXX] src\main.cpp
 if errorlevel 1 goto error
 
 echo [LD]  build\pacman.exe
-%CXX% build\Types.o build\GameEngine.o build\Renderer.o build\Listener.o build\main.o -o build\pacman.exe
+%CXX% %OBJS% build\main.o -o build\pacman.exe
 if errorlevel 1 goto error
 
 echo Build reusit: build\pacman.exe
@@ -36,7 +38,7 @@ goto end
 echo [CXX] tests\smoke_test.cpp
 %CXX% %CXXFLAGS% -c tests\smoke_test.cpp -o build\smoke_test.o
 if errorlevel 1 goto error
-%CXX% build\Types.o build\GameEngine.o build\Renderer.o build\Listener.o build\smoke_test.o -o build\smoke_test.exe
+%CXX% %OBJS% build\smoke_test.o -o build\smoke_test.exe
 if errorlevel 1 goto error
 build\smoke_test.exe
 goto end
