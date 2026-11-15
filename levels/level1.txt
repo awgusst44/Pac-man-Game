@@ -1,0 +1,19 @@
+; Pacman - nivelul 1
+;   #  perete          .  punct            o  bila de putere
+;   P  Pacman          G  fantoma (in casa fantomelor)      spatiu = gol
+; Randurile care incep cu ';' sunt comentarii. Randurile mai scurte se completeaza cu spatii.
+#####################
+#o........#........o#
+#.###.###.#.###.###.#
+#...................#
+#.###.#.#####.#.###.#
+#.....#...#...#.....#
+#####.### # ###.#####
+     .  #GGG#  .     
+#####.# ##### #.#####
+#.....#...#...#.....#
+#.###.###.#.###.###.#
+#o..#.....P.....#..o#
+#.###.#.#####.#.###.#
+#...................#
+#####################
