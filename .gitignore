@@ -1,4 +1,4 @@
-# Fisiere obiect si executabile
+# Fișiere obiect și executabile
 build/
 *.o
 *.obj
@@ -12,5 +12,12 @@ build/
 *.dll
 *.so
 
-# Setari locale ale editorului
+# Setări locale ale editorului
 .vscode/
+
+# Date generate de joc
+highscores.txt
+highscores.db
+*.db
+*.sqlite
+*.tmp

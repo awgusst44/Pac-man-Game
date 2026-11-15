@@ -105,16 +105,22 @@ void HighScores::save(std::ostream& out) const {
     std::copy(entries_.begin(), entries_.end(), std::ostream_iterator<ScoreEntry>(out, "\n"));
 }
 
+void HighScores::assign(std::vector<ScoreEntry> entries) {
+    // Intrările negative sau fără nume valid sunt ignorate; numele se curăță.
+    entries.erase(std::remove_if(entries.begin(), entries.end(),
+                                 [](const ScoreEntry& e) { return e.score < 0 || e.name.empty(); }),
+                  entries.end());
+    std::for_each(entries.begin(), entries.end(),
+                  [](ScoreEntry& e) { e.name = sanitizeName(e.name); });
+    entries_ = std::move(entries);
+    normalize();
+}
+
 void HighScores::load(std::istream& in) {
     std::vector<ScoreEntry> loaded;
     std::copy(std::istream_iterator<ScoreEntry>(in), std::istream_iterator<ScoreEntry>(),
               std::back_inserter(loaded));
-    // Intrările negative sau fără nume valid sunt ignorate.
-    loaded.erase(std::remove_if(loaded.begin(), loaded.end(),
-                                [](const ScoreEntry& e) { return e.score < 0 || e.name.empty(); }),
-                 loaded.end());
-    entries_ = std::move(loaded);
-    normalize();
+    assign(std::move(loaded));
 }
 
 bool HighScores::saveToFile(const std::string& path) const {

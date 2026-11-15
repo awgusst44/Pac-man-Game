@@ -47,6 +47,9 @@ public:
     std::vector<ScoreEntry> forPlayer(const std::string& name) const;    // toate scorurile unui jucător
     int total() const;                                                   // suma scorurilor
 
+    // Înlocuiește conținutul: elimină intrările invalide, sortează, taie la capacitate.
+    void assign(std::vector<ScoreEntry> entries);
+
     // Citire / scriere prin fluxuri (un rând pe intrare).
     void save(std::ostream& out) const;
     void load(std::istream& in);

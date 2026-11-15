@@ -19,6 +19,8 @@
 #include "GameEngine.hpp"
 #include "HighScores.hpp"
 #include "Renderer.hpp"
+#include "ScoreStorage.hpp"
+#include "SqliteScoreStorage.hpp"
 #include "Types.hpp"
 
 namespace {
@@ -596,7 +598,7 @@ void testGameWithSmartPointers() {
               "Tester Unu");
     CHECK(game.playerName() == "Tester_Unu");
     CHECK(config.use_count() >= 3);  // partajată între main, Game și GameEngine
-    CHECK(!game.setScoresFile(scoresPath));  // fișierul nu există încă
+    CHECK(!game.setStorage(std::make_unique<TextScoreStorage>(scoresPath)));  // nu există încă nimic de citit
     CHECK(game.loadLevel({"#####", "#P..#", "#####"}));
 
     game.step();
@@ -654,6 +656,96 @@ void testSharedConfig() {
     const std::shared_ptr<const GameConfig> nothing;
     GameEngine nullConfig(nothing);
     CHECK(nullConfig.config().isValid());
+}
+
+void testScoreStorage() {
+    HighScores table(3);
+    table.add("Ana", 300);
+    table.add("Bob", 900);
+    table.add("Cris", 600);
+
+    // ---- fișier text, prin interfața abstractă ----
+    const std::string textPath = "smoke_storage.tmp";
+    std::remove(textPath.c_str());
+    {
+        std::unique_ptr<ScoreStorage> storage = std::make_unique<TextScoreStorage>(textPath);
+        HighScores empty(3);
+        CHECK(!storage->load(empty) && empty.empty());  // fișierul nu există încă
+        CHECK(storage->save(table));
+        HighScores loaded(3);
+        CHECK(storage->load(loaded) && loaded == table);
+        CHECK(storage->description() == "text: " + textPath);
+    }
+    std::remove(textPath.c_str());
+
+    // ---- SQLite (bibliotecă externă): bază de date în memorie ----
+    SqliteScoreStorage memory(":memory:");
+    CHECK(memory.isOpen() && memory.lastError().empty());
+    CHECK(!SqliteScoreStorage::libraryVersion().empty());
+    CHECK(memory.description() == "SQLite: :memory:");
+
+    HighScores fromDb(3);
+    CHECK(memory.load(fromDb) && fromDb.empty());  // tabel nou, gol, dar citirea reușește
+    CHECK(memory.save(table));
+    CHECK(memory.load(fromDb) && fromDb == table);
+
+    // salvarea înlocuiește conținutul (nu se acumulează duplicate)
+    CHECK(memory.save(table));
+    HighScores again(10);
+    CHECK(memory.load(again) && again.entries().size() == 3);
+
+    // un scor nou intră în top și se păstrează
+    table.add("Dan", 700);
+    CHECK(memory.save(table));
+    HighScores updated(3);
+    CHECK(memory.load(updated) && updated == table);
+    CHECK(updated.entries()[1] == ScoreEntry("Dan", 700));
+
+    // capacitatea tabelei limitează rezultatul interogării (LIMIT)
+    HighScores top2(2);
+    CHECK(memory.load(top2) && top2.entries().size() == 2 && top2.entries()[0].name == "Bob");
+
+    // ---- SQLite într-un fișier: datele rămân după închiderea conexiunii ----
+    const std::string dbPath = "smoke_storage.db";
+    std::remove(dbPath.c_str());
+    {
+        SqliteScoreStorage first(dbPath);
+        CHECK(first.isOpen() && first.save(table));
+    }  // conexiunea se închide aici (unique_ptr cu ștergător)
+    {
+        SqliteScoreStorage second(dbPath);
+        HighScores reloaded(3);
+        CHECK(second.isOpen() && second.load(reloaded) && reloaded == table);
+    }
+    std::remove(dbPath.c_str());
+
+    // ---- cale imposibilă: deschiderea eșuează, fără excepții ----
+    SqliteScoreStorage broken("/folder/care/nu/exista/scoruri.db");
+    CHECK(!broken.isOpen() && !broken.lastError().empty());
+    HighScores untouched(3);
+    CHECK(!broken.load(untouched) && !broken.save(table));
+
+    // ---- Game cu stocare SQLite în fișier ----
+    const std::string gameDb = "smoke_game.db";
+    std::remove(gameDb.c_str());
+    {
+        Game game(std::make_unique<RecordingRenderer>(),
+                  std::make_unique<ScriptedListener>(std::vector<Command>{Command::MoveRight}),
+                  nullptr, "Sql Player");
+        CHECK(!game.setStorage(std::make_unique<SqliteScoreStorage>(gameDb)) ||
+              game.highScores().empty());
+        CHECK(game.loadLevel({"#####", "#P..#", "#####"}));
+        game.step();
+        game.step();
+        CHECK(game.engine().state() == GameState::Won);
+    }
+    {
+        SqliteScoreStorage check(gameDb);
+        HighScores stored(5);
+        CHECK(check.load(stored));
+        CHECK(stored.entries().size() == 1 && stored.entries().front() == ScoreEntry("Sql_Player", 20));
+    }
+    std::remove(gameDb.c_str());
 }
 
 void testWin() {
@@ -764,6 +856,7 @@ int main() {
     testHighScores();
     testGameWithSmartPointers();
     testSharedConfig();
+    testScoreStorage();
     testLoadLevel();
     testWin();
     testPauseAndQuit();

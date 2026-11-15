@@ -10,6 +10,8 @@
 #include "HighScores.hpp"
 #include "Listener.hpp"
 #include "Renderer.hpp"
+#include "ScoreStorage.hpp"
+#include "SqliteScoreStorage.hpp"
 
 namespace {
 
@@ -28,12 +30,28 @@ std::string optionValue(const Args& args, const std::string& option, const std::
     return *std::next(found);
 }
 
+bool endsWith(const std::string& text, const std::string& suffix) {
+    return text.size() >= suffix.size() &&
+           std::equal(suffix.rbegin(), suffix.rend(), text.rbegin());
+}
+
+// Alege locul de păstrare a scorurilor după extensia fișierului:
+// .db / .sqlite -> bază de date SQLite, orice altceva -> fișier text.
+std::unique_ptr<pacman::ScoreStorage> makeStorage(const std::string& path) {
+    if (endsWith(path, ".db") || endsWith(path, ".sqlite")) {
+        return std::make_unique<pacman::SqliteScoreStorage>(path);
+    }
+    return std::make_unique<pacman::TextScoreStorage>(path);
+}
+
 void printHelp() {
     std::cout << "Pacman\n"
                  "  pacman                    porneste jocul\n"
                  "  pacman --level <fisier>   incarca nivelul din fisier (implicit levels/level1.txt)\n"
                  "  pacman --name <nume>      numele jucatorului in tabela de scoruri\n"
                  "  pacman --scores           afiseaza tabela de scoruri si iese\n"
+                 "  pacman --scores-file <f>  unde se pastreaza scorurile: *.db = SQLite, altfel text\n"
+                 "                            (implicit highscores.db)\n"
                  "  pacman --demo             demonstratie (constructori, STL, fluxuri, smart pointers)\n"
                  "  pacman --help             acest mesaj\n";
 }
@@ -44,7 +62,7 @@ int main(int argc, char** argv) {
     using namespace pacman;
 
     const Args args(argv + 1, argv + argc);
-    const std::string scoresPath = optionValue(args, "--scores-file", "highscores.txt");
+    const std::string scoresPath = optionValue(args, "--scores-file", "highscores.db");
 
     if (hasFlag(args, "--help")) {
         printHelp();
@@ -55,7 +73,9 @@ int main(int argc, char** argv) {
     }
     if (hasFlag(args, "--scores")) {
         HighScores table;
-        table.loadFromFile(scoresPath);
+        const std::unique_ptr<ScoreStorage> storage = makeStorage(scoresPath);
+        storage->load(table);
+        std::cout << "Sursa: " << storage->description() << "\n";
         table.print(std::cout);
         return 0;
     }
@@ -86,7 +106,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    game.setScoresFile(scoresPath);
+    game.setStorage(makeStorage(scoresPath));
     game.run();
     game.highScores().print(std::cout);
     return 0;

@@ -9,6 +9,7 @@
 #include "HighScores.hpp"
 #include "Listener.hpp"
 #include "Renderer.hpp"
+#include "ScoreStorage.hpp"
 
 namespace pacman {
 
@@ -27,8 +28,10 @@ public:
     bool loadLevel(const std::vector<std::string>& layout);
     bool loadLevel(std::istream& in);
 
-    // Fișierul tabelei de scoruri: se citește acum și se rescrie când scorul intră în top.
-    bool setScoresFile(const std::string& path);
+    // Locul unde se păstrează scorurile (fișier text, bază de date SQLite...).
+    // Tabela existentă se citește imediat și se rescrie când un scor intră în top.
+    // Returnează false dacă nu există încă nimic de citit.
+    bool setStorage(std::unique_ptr<ScoreStorage> storage);
 
     void run();      // bucla jocului, până la Q
     void step();     // un singur tick: intrare, simulare, desenare, scoruri
@@ -48,7 +51,7 @@ private:
     GameEngine engine_;
     HighScores scores_;
     std::string playerName_;
-    std::string scoresPath_;
+    std::unique_ptr<ScoreStorage> storage_;  // poate lipsi: atunci scorurile nu se păstrează
     bool recorded_{false};  // scorul jocului curent a fost deja înregistrat
 };
 

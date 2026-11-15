@@ -46,9 +46,9 @@ bool Game::loadLevel(const std::vector<std::string>& layout) { return engine_.lo
 
 bool Game::loadLevel(std::istream& in) { return engine_.loadLevel(in); }
 
-bool Game::setScoresFile(const std::string& path) {
-    scoresPath_ = path;
-    return scores_.loadFromFile(path);  // false dacă fișierul nu există încă
+bool Game::setStorage(std::unique_ptr<ScoreStorage> storage) {
+    storage_ = std::move(storage);
+    return storage_ != nullptr && storage_->load(scores_);
 }
 
 void Game::step() {
@@ -85,8 +85,8 @@ void Game::trackResult() {
 
 void Game::recordScore() {
     recorded_ = true;
-    if (scores_.add(playerName_, engine_.score().current) && !scoresPath_.empty()) {
-        scores_.saveToFile(scoresPath_);
+    if (scores_.add(playerName_, engine_.score().current) && storage_) {
+        storage_->save(scores_);
     }
 }
 

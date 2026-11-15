@@ -18,6 +18,8 @@
 #include "GameEngine.hpp"
 #include "HighScores.hpp"
 #include "Renderer.hpp"
+#include "ScoreStorage.hpp"
+#include "SqliteScoreStorage.hpp"
 #include "Types.hpp"
 
 namespace pacman {
@@ -135,6 +137,24 @@ int runDemo(std::ostream& out) {
         << " (config, first, second)\n";
     out << "std::string in loc de char*: toString(Direction::Left) = \"" << toString(Direction::Left)
         << "\"\n";
+
+    // ---------------------------------------------------------------- 6
+    title(out, "6. Biblioteci statice si biblioteca externa SQLite (lab05)");
+    out << "Clasele de date vin din biblioteci statice separate: enums, position, pacman, ghost,\n"
+           "board, score, config, highscores; stocarea in SQLite vine din libpacman_sqlite + SQLite3.\n";
+    out << "Versiunea SQLite folosita: " << SqliteScoreStorage::libraryVersion() << "\n";
+
+    std::unique_ptr<ScoreStorage> storage = std::make_unique<SqliteScoreStorage>(":memory:");
+    out << "Stocare: " << storage->description() << "\n";
+    HighScores toStore(3);
+    toStore.add("Ana", 1200);
+    toStore.add("Bob", 800);
+    toStore.add("Cris", 1500);
+    out << "save -> " << storage->save(toStore) << "\n";
+    HighScores fromDatabase(3);
+    out << "load -> " << storage->load(fromDatabase) << ", identic cu originalul: "
+        << (fromDatabase == toStore) << "\n";
+    fromDatabase.print(out);
     return 0;
 }
 

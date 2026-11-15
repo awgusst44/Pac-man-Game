@@ -21,31 +21,36 @@ Jucătorul controlează personajul **Pacman** într-un labirint, mănâncă toat
 **Fantome (comportament):** fantomele alternează între `Scatter` (se duc spre colțul lor) și `Chase` (urmăresc): *Blinky* țintește direct Pacman, *Pinky* țintește 4 celule în fața lui, *Inky* folosește poziția lui Blinky și a lui Pacman, *Clyde* urmărește de la distanță și se retrage când este aproape. Fantomele nu se întorc pe loc (cu excepția fundurilor de sac) și nu mai intră în casa lor decât după ce sunt mâncate.
 
 ## 3. Structuri de date și descrierea lor
-Toate tipurile se află în namespace-ul `pacman`. Declarațiile sunt în `include/`, implementările în `src/`.
+Toate tipurile se află în namespace-ul `pacman`. Declarațiile sunt în `include/`, implementările în `src/`. Fiecare clasă de date are propria bibliotecă statică (secțiunea 6).
 
 | Structură / clasă | Fișiere | Descriere |
 |---|---|---|
-| `Position` | `Types` | Coordonate `(x, y)`; `moved`, `distanceSquared`; ordonată, deci poate fi cheie în `std::set` / `std::map`. |
-| `Direction`, `CellType`, `GameState`, `GhostType`, `GhostMode`, `Command` | `Types` | Enum-uri: direcții, celule, starea jocului, fantome, comenzi abstracte. |
-| `Pacman`, `Ghost` | `Types` | Personajele jocului (poziție, direcție, vieți / mod, timer de vulnerabilitate). |
-| `Board` | `Types` | Grila labirintului (`std::vector<CellType>`); `wrap` (tunel), `isWalkable`, `positionsOf` (`std::set`), `reachableFrom` (parcurgere în lățime). |
-| `Score`, `GameConfig` | `Types` | Scorul curent / recordul și parametrii jocului. |
-| `GameEngine` | `GameEngine` | **Motorul de joc:** încarcă nivelul (din vector de rânduri sau din flux), procesează comenzi, mută Pacman și fantomele, verifică coliziunile. Nu știe nimic despre desenare sau tastatură. |
-| `Renderer` *(abstractă)* | `Renderer` | Clasa de bază abstractă a desenatorului (secțiunea 4.4). |
-| `ConsoleRenderer` | `Renderer` | Implementarea concretă: desenează în consolă cu culori ANSI. |
-| `Listener` / `ConsoleListener` | `Listener` | **Ascultătorul:** interfață abstractă; `ConsoleListener` citește tastatura fără blocare, folosind tabele `std::map` pentru taste. |
-| `ScoreEntry`, `HighScores` | `HighScores` | **Nou (lab04).** Tabela celor mai bune scoruri: sortare, căutare, citire/scriere prin fișiere. |
-| `Game` | `Game` | **Nou (lab04).** Aplicația: deține `Renderer` și `Listener` prin `std::unique_ptr`, partajează configurația prin `std::shared_ptr`, ține tabela de scoruri. |
-| `runDemo` | `Demo` | **Nou (lab04).** Demonstrația `--demo`. |
+| enum-uri (`Direction`, `CellType`, `GameState`, `GhostType`, `GhostMode`, `Command`) | `Enums` | Direcții, celule, starea jocului, fantome, comenzi abstracte; `opposite`, `toString`, `toChar`. |
+| `Position` | `Position` | Coordonate `(x, y)`; `moved`, `distanceSquared`; ordonată, deci poate fi cheie în `std::set` / `std::map`. |
+| `Pacman` | `Pacman` | Poziție, start, direcție curentă și cerută, vieți. |
+| `Ghost` | `Ghost` | Tip, mod, poziție, start, direcție, timer de vulnerabilitate. |
+| `Board` | `Board` | Grila labirintului (`std::vector<CellType>`); `wrap` (tunel), `isWalkable`, `positionsOf`, `reachableFrom`. |
+| `Score` | `Score` | Scorul curent și recordul. |
+| `GameConfig` | `GameConfig` | Parametrii jocului: vieți, durate, puncte, viteza fantomelor. |
+| `ScoreEntry`, `HighScores` | `HighScores` | Tabela celor mai bune scoruri: sortare, căutare, citire/scriere prin fluxuri. |
+| `ScoreStorage` *(abstractă)*, `TextScoreStorage` | `ScoreStorage` | Interfața de păstrare a scorurilor și varianta cu fișier text. |
+| `SqliteScoreStorage` | `SqliteScoreStorage` | Varianta cu bază de date **SQLite** (bibliotecă externă). |
+| `GameEngine` | `GameEngine` | **Motorul de joc:** încarcă nivelul, procesează comenzi, mută Pacman și fantomele, verifică coliziunile. Nu știe nimic despre desenare sau tastatură. |
+| `Renderer` *(abstractă)*, `ConsoleRenderer` | `Renderer` | Desenatorul: clasa de bază abstractă și implementarea pentru consolă. |
+| `Listener` / `ConsoleListener` | `Listener` | Ascultătorul: interfață abstractă și citirea tastaturii, cu tabele `std::map`. |
+| `Game` | `Game` | Aplicația: deține `Renderer`, `Listener` și `ScoreStorage` prin `std::unique_ptr`, partajează configurația prin `std::shared_ptr`. |
+| `runDemo` | `Demo` | Demonstrația `--demo`. |
 
-**Arhitectura:** `Listener` → produce `Command` → `GameEngine` își actualizează starea → `Renderer` citește starea (`const`) și o afișează. `Game` leagă cele trei componente și înregistrează scorul la sfârșitul jocului.
+`include/Types.hpp` este un antet de comoditate, care include toate clasele de date de mai sus.
+
+**Arhitectura:** `Listener` → produce `Command` → `GameEngine` își actualizează starea → `Renderer` citește starea (`const`) și o afișează. `Game` leagă componentele și înregistrează scorul prin `ScoreStorage` la sfârșitul jocului.
 
 **Nivelul** este un fișier text, `levels/level1.txt`: `#` perete, `.` punct, `o` bilă de putere, `P` Pacman, `G` fantomă (în casa fantomelor), spațiu = gol. Rândurile care încep cu `;` sunt comentarii, iar rândurile mai scurte se completează cu spații. Dacă fișierul lipsește, se folosește nivelul încorporat (`Game::defaultLevel()`). Un nivel în care nu toate punctele pot fi mâncate este respins la încărcare.
 
 ## 4. Constructori, operatori și clasa abstractă (lab03)
 
 ### 4.1. Ce are fiecare structură de joc
-Fiecare structură are definite explicit (în `Types.cpp`): constructor implicit, constructor cu parametri, constructor de copiere, operator de atribuire (cu protecție la auto-atribuire), operatori de comparare și operatori `<<` / `>>`.
+Fiecare structură are definite explicit (în fișierul `.cpp` al fiecărei clase, de exemplu `Position.cpp`, `Board.cpp`): constructor implicit, constructor cu parametri, constructor de copiere, operator de atribuire (cu protecție la auto-atribuire), operatori de comparare și operatori `<<` / `>>`.
 
 | Structură | Constructor implicit | Constructor cu parametri | Comparare |
 |---|---|---|---|
@@ -113,7 +118,7 @@ build\pacman.exe --demo
 | `std::optional<ScoreEntry>` | `HighScores::best()` | „poate nu există" fără pointer nul |
 
 ### 5.2. Fluxuri de intrare / ieșire
-- **Fișiere:** `std::ifstream` citește nivelul (`levels/level1.txt`) și tabela de scoruri; `std::ofstream` salvează scorurile (`highscores.txt`).
+- **Fișiere:** `std::ifstream` citește nivelul (`levels/level1.txt`) și tabela de scoruri; `std::ofstream` salvează scorurile (varianta cu fișier text, `TextScoreStorage`; varianta implicită folosește SQLite, secțiunea 6.2).
 - **Șiruri ca fluxuri:** `std::istringstream` / `std::ostringstream` în teste și în demonstrație.
 - **Operatori:** `operator<<` / `operator>>` pentru toate structurile (lab03), pentru `ScoreEntry` și `operator<<` pentru `GameEngine` (scrie nivelul în formatul din fișier).
 - **Iteratori de flux:** `std::istream_iterator<ScoreEntry>` citește tabela, `std::ostream_iterator<ScoreEntry>` o scrie.
@@ -142,58 +147,109 @@ build\pacman.exe --demo
 
 ### 5.6. Funcții noi
 - **Nivel din fișier:** `build\pacman.exe --level levels\level1.txt` (implicit se încearcă `levels/level1.txt`).
-- **Tabela de scoruri:** scorul se înregistrează la victorie, la înfrângere sau la ieșirea cu `Q`; se salvează în `highscores.txt` (ignorat de Git). `build\pacman.exe --scores` afișează tabela, iar `--name <nume>` setează numele jucătorului.
+- **Tabela de scoruri:** scorul se înregistrează la victorie, la înfrângere sau la ieșirea cu `Q`. Din lab05 se păstrează implicit într-o bază de date SQLite (`highscores.db`, ignorată de Git). `build\pacman.exe --scores` afișează tabela, iar `--name <nume>` setează numele jucătorului. Cu `--scores-file <fișier>`: extensia `.db` / `.sqlite` înseamnă SQLite, orice altceva înseamnă fișier text.
 - **Demonstrație:** `build\pacman.exe --demo` arată containerele, algoritmii, fluxurile și smart pointers.
 - **Ajutor:** `build\pacman.exe --help`.
 
-## 6. Construirea proiectului
-Este necesar un compilator C++17 (`g++`, de exemplu MinGW-w64 din MSYS2). Proiectul nu folosește biblioteci externe.
+## 6. Biblioteci (lab05)
+
+### 6.1. Biblioteci statice pentru clasele de date
+Fiecare clasă de date este compilată într-o **bibliotecă statică** proprie (`.a`, creată cu `ar`) și aplicația se leagă de ele. Am ales biblioteci *statice* pentru că rezultă un singur executabil, fără fișiere `.dll` de distribuit sau de găsit în `PATH`.
+
+| Bibliotecă | Conține | Sursă | Depinde de |
+|---|---|---|---|
+| `libpacman_enums.a` | enum-urile și funcțiile lor | `Enums.cpp` | — |
+| `libpacman_position.a` | `Position` | `Position.cpp` | enums |
+| `libpacman_pacman.a` | `Pacman` | `Pacman.cpp` | position, enums |
+| `libpacman_ghost.a` | `Ghost` | `Ghost.cpp` | position, enums |
+| `libpacman_board.a` | `Board` | `Board.cpp` | position, enums |
+| `libpacman_score.a` | `Score` | `Score.cpp` | — |
+| `libpacman_config.a` | `GameConfig` | `GameConfig.cpp` | — |
+| `libpacman_highscores.a` | `ScoreEntry`, `HighScores`, `ScoreStorage`, `TextScoreStorage` | `HighScores.cpp`, `ScoreStorage.cpp` | — |
+| `libpacman_sqlite.a` | `SqliteScoreStorage` | `SqliteScoreStorage.cpp` | **SQLite3** (externă) |
+
+Aplicația (`GameEngine`, `Renderer`, `Listener`, `Game`, `Demo`, `main`) este compilată direct în executabil. Ajutoarele pentru operatorii `>>` sunt în `StreamParsing.hpp` (funcții inline, deci nu aparțin nici unei biblioteci).
+
+Bibliotecile sunt independente între ele: simbolurile SQLite apar **doar** în `libpacman_sqlite.a`, deci o aplicație care nu păstrează scoruri în SQLite nu are nevoie de SQLite.
+
+### 6.2. Biblioteca externă: SQLite3 (păstrarea datelor)
+[SQLite](https://www.sqlite.org) este o bază de date SQL într-un fișier, fără server. `SqliteScoreStorage` o folosește pentru scoruri:
+- tabelul `scores(id, name, score, played_at)`, creat automat;
+- **citire:** `SELECT name, score FROM scores ORDER BY score DESC, name ASC LIMIT ?` (sortarea și limita le face baza de date);
+- **scriere:** într-o tranzacție (`BEGIN` … `COMMIT` / `ROLLBACK`), cu instrucțiuni pregătite (`sqlite3_prepare_v2`, `sqlite3_bind_*`);
+- resursele (`sqlite3*`, `sqlite3_stmt*`) sunt păstrate în `std::unique_ptr` cu ștergător propriu, deci se închid automat, fără `delete` / `close` manual;
+- headerul `SqliteScoreStorage.hpp` nu include `<sqlite3.h>` (idiom *pimpl*), deci doar `SqliteScoreStorage.cpp` are nevoie de SQLite la compilare.
+
+Jocul depinde doar de interfața `ScoreStorage`, deci stocarea poate fi schimbată (SQLite sau fișier text) fără a modifica `Game`.
+
+**Instalare (o singură dată):** în terminalul **MSYS2 UCRT64**:
+```
+pacman -S mingw-w64-ucrt-x86_64-sqlite3
+```
+Pe Linux: `sudo apt install libsqlite3-dev`.
+
+## 7. Construirea proiectului
+Este necesar un compilator C++17 (`g++`, de exemplu MinGW-w64 din MSYS2) și biblioteca SQLite3 (secțiunea 6.2).
 
 ### Windows (cmd / PowerShell) — `build.cmd`
 ```
-build.cmd          :: compilează jocul în build\pacman.exe
-build.cmd run      :: compilează și pornește jocul
-build.cmd test     :: compilează și rulează testele
+build.cmd          :: construiește bibliotecile statice și jocul (build\pacman.exe)
+build.cmd run      :: construiește și pornește jocul
+build.cmd test     :: construiește și rulează testele
 build.cmd clean    :: șterge folderul build
 ```
-Rulează jocul într-un terminal modern (Windows Terminal sau terminalul din VS Code; culorile folosesc coduri ANSI).
+Scriptul face, în ordine: (1) compilează sursele bibliotecilor în `build\obj`, (2) creează bibliotecile statice în `build\lib` cu `ar rcs`, (3) compilează aplicația, (4) leagă aplicația cu bibliotecile și cu SQLite3.
 
 ### Linux sau terminal MSYS2 — `Makefile`
 ```
-make          # compilează jocul în build/pacman
-make run      # compilează și pornește jocul
-make test     # compilează și rulează testele
+make          # construiește bibliotecile și jocul (build/pacman)
+make libs     # doar bibliotecile statice (build/lib/*.a)
+make run      # construiește și pornește jocul
+make test     # construiește și rulează testele
 make clean    # șterge folderul build
 ```
+Lista bibliotecilor și a surselor lor este la începutul `Makefile`-ului (`LIBS`, `SRC_<nume>`); o regulă generică construiește fiecare bibliotecă.
 
 ### Compilare manuală, pas cu pas
 ```
-mkdir build
-g++ -std=c++17 -Wall -Wextra -Iinclude -c src/Types.cpp -o build/Types.o
-g++ -std=c++17 -Wall -Wextra -Iinclude -c src/GameEngine.cpp -o build/GameEngine.o
-g++ -std=c++17 -Wall -Wextra -Iinclude -c src/Renderer.cpp -o build/Renderer.o
-g++ -std=c++17 -Wall -Wextra -Iinclude -c src/Listener.cpp -o build/Listener.o
-g++ -std=c++17 -Wall -Wextra -Iinclude -c src/HighScores.cpp -o build/HighScores.o
-g++ -std=c++17 -Wall -Wextra -Iinclude -c src/Game.cpp -o build/Game.o
-g++ -std=c++17 -Wall -Wextra -Iinclude -c src/Demo.cpp -o build/Demo.o
-g++ -std=c++17 -Wall -Wextra -Iinclude -c src/main.cpp -o build/main.o
-g++ build/Types.o build/GameEngine.o build/Renderer.o build/Listener.o build/HighScores.o build/Game.o build/Demo.o build/main.o -o build/pacman
-```
-Opțiuni: `-std=c++17` — standardul limbajului, `-Wall -Wextra` — avertismente, `-Iinclude` — folderul cu headere, `-c` — doar compilare (fișier obiect), `-o` — numele fișierului rezultat.
+mkdir build\obj
+mkdir build\lib
 
-Fișierele obiect și executabilele sunt ignorate de Git (`.gitignore`).
+:: 1. fișierul obiect al unei clase
+g++ -std=c++17 -Wall -Wextra -Iinclude -c src/Position.cpp -o build/obj/Position.o
+
+:: 2. biblioteca statică din fișierul obiect
+ar rcs build/lib/libpacman_position.a build/obj/Position.o
+
+:: (la fel pentru celelalte clase; vezi build.cmd)
+
+:: 3. aplicația
+g++ -std=c++17 -Wall -Wextra -Iinclude -c src/main.cpp -o build/obj/main.o
+
+:: 4. legarea: bibliotecile proprii, apoi biblioteca externă (-lsqlite3)
+g++ build/obj/GameEngine.o build/obj/Renderer.o build/obj/Listener.o build/obj/Game.o build/obj/Demo.o build/obj/main.o ^
+    -Lbuild/lib -Wl,--start-group -lpacman_enums -lpacman_position -lpacman_pacman -lpacman_ghost ^
+    -lpacman_board -lpacman_score -lpacman_config -lpacman_highscores -lpacman_sqlite -Wl,--end-group ^
+    -lsqlite3 -o build/pacman
+```
+Opțiuni: `ar rcs` — creează (`c`) arhiva (`r` adaugă / înlocuiește fișierele obiect, `s` scrie indexul simbolurilor); `-L<folder>` — unde se caută bibliotecile; `-l<nume>` — leagă `lib<nume>.a`; `-Wl,--start-group … --end-group` — bibliotecile se pot referi una pe alta, deci ordinea nu mai contează.
+
+Fișierele obiect, bibliotecile (`.a`), executabilele și bazele de date generate de joc sunt ignorate de Git (`.gitignore`).
 
 ## Structura repozitoriului
 ```
-include/            Types.hpp  GameEngine.hpp  Renderer.hpp  Listener.hpp
-                    HighScores.hpp  Game.hpp  Demo.hpp
-src/                Types.cpp  GameEngine.cpp  Renderer.cpp  Listener.cpp
-                    HighScores.cpp  Game.cpp  Demo.cpp  main.cpp
+include/            Enums.hpp  Position.hpp  Pacman.hpp  Ghost.hpp  Board.hpp  Score.hpp  GameConfig.hpp
+                    Types.hpp (antet de comoditate)  StreamParsing.hpp
+                    HighScores.hpp  ScoreStorage.hpp  SqliteScoreStorage.hpp
+                    GameEngine.hpp  Renderer.hpp  Listener.hpp  Game.hpp  Demo.hpp
+src/                Enums.cpp  Position.cpp  Pacman.cpp  Ghost.cpp  Board.cpp  Score.cpp  GameConfig.cpp
+                    HighScores.cpp  ScoreStorage.cpp  SqliteScoreStorage.cpp
+                    GameEngine.cpp  Renderer.cpp  Listener.cpp  Game.cpp  Demo.cpp  main.cpp
 tests/              smoke_test.cpp
 levels/             level1.txt
-build.cmd           construire pe Windows
+build.cmd           construire pe Windows (biblioteci statice + aplicație)
 Makefile            construire pe Linux / MSYS2
-.gitignore          ignoră build/, *.o, *.exe, highscores.txt
+.gitignore          ignoră build/, *.o, *.a, *.exe, *.db
 prompts_lab01.md    prompturile LLM folosite
 README.md
 ```
